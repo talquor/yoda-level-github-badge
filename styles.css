@@ -1,0 +1,10 @@
+body {
+    font-family: 'Courier New', Courier, monospace;
+}
+canvas {
+    border-radius: 4px;
+}
+textarea {
+    resize: none;
+    height: 100px;
+}
