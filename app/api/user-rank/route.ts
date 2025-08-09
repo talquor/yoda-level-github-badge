@@ -1,7 +1,7 @@
-import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '../../../lib/github';
-import { scoreFromGraphQL, scoreFromREST } from '../../../lib/score';
-import { pickTierByPoints, TIERS } from '../../../lib/rank';
-import { buildBadgeSVG } from '../../../lib/badge';
+import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '@/lib/github';
+import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
+import { pickTierByPoints, TIERS } from '@/lib/rank';
+import { buildBadgeSVG } from '@/lib/badge';
 
 export const runtime = 'edge';
 
@@ -15,22 +15,24 @@ export async function GET(req: Request) {
     });
   }
 
-  const badge = searchParams.get('badge') === '1'; // return SVG directly
+  const badge = searchParams.get('badge') === '1';
   const label = searchParams.get('label') ?? 'Yoda Rank';
-  const logo = searchParams.get('logo') === 'github';
+  const logo = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
   const token = process.env.GITHUB_TOKEN;
 
   let points = 0;
   let used = 'rest';
+  let approxStars = 0;
+  let approxFollowers = 0;
 
   try {
-    // Try GraphQL first (if token provided)
     const gql = await fetchUserMetricsGraphQL(username, token);
     if (gql) {
       points = scoreFromGraphQL(gql);
       used = 'graphql';
+      approxStars = gql.totalStars;
+      approxFollowers = gql.followers;
     } else {
-      // REST fallback
       const [u, repos, events] = await Promise.all([
         fetchUserREST(username, token),
         fetchReposREST(username, token),
@@ -50,6 +52,9 @@ export async function GET(req: Request) {
         })),
         events: (events ?? []).map((e: any) => ({ type: e.type, created_at: e.created_at }))
       });
+
+      approxStars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
+      approxFollowers = u.followers ?? 0;
     }
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message || 'GitHub fetch failed' }), {
@@ -57,6 +62,9 @@ export async function GET(req: Request) {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
+
+  // Promote legends or astronomical accounts to Yoda (100 points).
+  points = applyLegendOverride(username, points, approxStars, approxFollowers);
 
   const tier = pickTierByPoints(points);
   const rightText = `${tier.name} (${tier.grade})`;
@@ -67,7 +75,7 @@ export async function GET(req: Request) {
       label,
       rightText,
       rightColor,
-      withGithubLogo: logo
+      icon: logo
     });
     return new Response(svg, {
       headers: {
@@ -78,7 +86,6 @@ export async function GET(req: Request) {
     });
   }
 
-  // JSON response (for debugging / programmatic use)
   return new Response(JSON.stringify({
     username,
     points,

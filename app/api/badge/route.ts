@@ -1,11 +1,7 @@
-import { pickTierByPoints } from '../../../lib/rank';
-import { buildBadgeSVG } from '../../../lib/badge';
+import { pickTierByPoints } from '@/lib/rank';
+import { buildBadgeSVG } from '@/lib/badge';
 
 export const runtime = 'edge';
-
-function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -15,7 +11,7 @@ export async function GET(req: Request) {
   const grade   = searchParams.get('grade')   ?? '';
   const pointsQ = searchParams.get('points');
   const color   = searchParams.get('color')   ?? '';
-  const logo    = searchParams.get('logo'); // 'github' to show GH
+  const logo    = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
 
   let rightPersona = persona;
   let rightGrade   = grade;
@@ -29,9 +25,10 @@ export async function GET(req: Request) {
     rightColor   = tier.color;
   }
 
-  rightPersona = rightPersona || 'Jedi';
-  rightGrade   = rightGrade   || 'S++';
-  rightColor   = rightColor   || '#22c55e';
+  // defaults (S++ look)
+  rightPersona ||= 'Master Yoda';
+  rightGrade   ||= 'S++';
+  rightColor   ||= '#22c55e';
 
   const rightText = `${rightPersona} (${rightGrade})`;
 
@@ -39,7 +36,7 @@ export async function GET(req: Request) {
     label,
     rightText,
     rightColor,
-    withGithubLogo: logo === 'github'
+    icon: logo
   });
 
   return new Response(svg, {
