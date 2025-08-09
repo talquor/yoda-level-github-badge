@@ -1,0 +1,14 @@
+{
+  "name": "yoda-level-github-badge",
+  "version": "1.0.0",
+  "description": "A Star Wars-themed GitHub badge generator",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Cosmin Memetea",
+  "license": "MIT",
+  "dependencies": {
+    "canvas": "^2.11.2"
+  }
+}
