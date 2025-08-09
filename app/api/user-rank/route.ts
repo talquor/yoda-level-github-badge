@@ -1,6 +1,6 @@
 import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '@/lib/github';
 import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
-import { pickTierByPoints, TIERS } from '@/lib/rank';
+import { pickTierByPoints, TIERS, tierWithBand } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
 
 export const runtime = 'edge';
@@ -18,6 +18,11 @@ export async function GET(req: Request) {
   const badge = searchParams.get('badge') === '1';
   const label = searchParams.get('label') ?? 'Yoda Rank';
   const logo = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
+
+  const granular = searchParams.get('granular') === '1';
+  const showPoints = searchParams.get('showPoints') === '1';
+  const showNext = searchParams.get('showNext') === '1';
+
   const token = process.env.GITHUB_TOKEN;
 
   let points = 0;
@@ -63,11 +68,17 @@ export async function GET(req: Request) {
     });
   }
 
-  // Promote legends or astronomical accounts to Yoda (100 points).
   points = applyLegendOverride(username, points, approxStars, approxFollowers);
 
-  const tier = pickTierByPoints(points);
-  const rightText = `${tier.name} (${tier.grade})`;
+  // Build right-hand text with optional band/points/next
+  const { tier, bandRoman, nextTier, pointsToNext } = tierWithBand(points);
+  const baseRight = granular ? `${tier.name} (${tier.grade}) • ${bandRoman}` : `${tier.name} (${tier.grade})`;
+  const parts = [baseRight];
+  if (showPoints) parts.push(`${points.toFixed(1)} pts`);
+  if (showNext && nextTier && pointsToNext !== undefined) {
+    parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
+  }
+  const rightText = parts.join(' • ');
   const rightColor = tier.color;
 
   if (badge) {
@@ -80,7 +91,7 @@ export async function GET(req: Request) {
     return new Response(svg, {
       headers: {
         'Content-Type': 'image/svg+xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=0, s-maxage=1800, must-revalidate',
+        'Cache-Control': 'public, max-age=0, s-maxage=1200, must-revalidate',
         'Access-Control-Allow-Origin': '*'
       }
     });
@@ -93,6 +104,7 @@ export async function GET(req: Request) {
     persona: tier.name,
     color: tier.color,
     method: used,
+    granular: granular ? { band: bandRoman, nextTier: nextTier?.name, pointsToNext } : undefined,
     tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
