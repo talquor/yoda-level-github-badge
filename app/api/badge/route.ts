@@ -1,5 +1,5 @@
-import { pickTierByPoints } from '@/lib/rank';
-import { buildBadgeSVG } from '@/lib/badge';
+import { pickTierByPoints } from '../../../lib/rank';
+import { buildBadgeSVG } from '../../../lib/badge';
 
 export const runtime = 'edge';
 

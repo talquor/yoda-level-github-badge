@@ -1,7 +1,7 @@
-import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '@/lib/github';
-import { scoreFromGraphQL, scoreFromREST } from '@/lib/score';
-import { pickTierByPoints, TIERS } from '@/lib/rank';
-import { buildBadgeSVG } from '@/lib/badge';
+import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '../../../lib/github';
+import { scoreFromGraphQL, scoreFromREST } from '../../../lib/score';
+import { pickTierByPoints, TIERS } from '../../../lib/rank';
+import { buildBadgeSVG } from '../../../lib/badge';
 
 export const runtime = 'edge';
 
