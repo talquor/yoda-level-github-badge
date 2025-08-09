@@ -43,31 +43,42 @@ export async function generateBadge() {
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
         for (const repo of repos) {
-            const commits = await fetchGitHubData(`https://api.github.com/repos/${username}/${repo.name}/commits?since=${thirtyDaysAgo.toISOString()}&per_page=100`, token);
-            if (commits) totalCommits += commits.length;
-            const prs = await fetchGitHubData(`https://api.github.com/repos/${username}/${repo.name}/pulls?state=closed&since=${thirtyDaysAgo.toISOString()}&per_page=100`, token);
-            if (prs) totalPRs += prs.filter(pr => pr.user.login === username && pr.merged_at && new Date(pr.merged_at) >= thirtyDaysAgo).length;
+            let page = 1;
+            while (true) {
+                const commits = await fetchGitHubData(`https://api.github.com/repos/${username}/${repo.name}/commits?since=${thirtyDaysAgo.toISOString()}&per_page=100&page=${page}`, token);
+                if (!commits || commits.length === 0) break;
+                totalCommits += commits.length;
+                page++;
+            }
+            page = 1;
+            while (true) {
+                const prs = await fetchGitHubData(`https://api.github.com/repos/${username}/${repo.name}/pulls?state=closed&since=${thirtyDaysAgo.toISOString()}&per_page=100&page=${page}`, token);
+                if (!prs || prs.length === 0) break;
+                totalPRs += prs.filter(pr => pr.user.login === username && pr.merged_at && new Date(pr.merged_at) >= thirtyDaysAgo).length;
+                page++;
+            }
         }
 
-        const baseScore = totalCommits * 0.8 + totalPRs * 8;
-        const score = Math.log10(baseScore + 1) * 100;
+        // Linear scaling with higher weights for high activity
+        const baseScore = (totalCommits * 2) + (totalPRs * 12);
+        const score = Math.min(baseScore, 1000); // Cap at 1000 to prevent extreme values
 
         let rank, title;
-        if (score >= 200) { rank = 'S++'; title = 'Jedi'; }
-        else if (score >= 180) { rank = 'S+'; title = 'Master Yoda'; }
-        else if (score >= 160) { rank = 'S'; title = 'Grand Master'; }
-        else if (score >= 140) { rank = 'S-'; title = 'Jedi Master'; }
-        else if (score >= 120) { rank = 'S--'; title = 'Darth Vader'; }
-        else if (score >= 100) { rank = 'A+'; title = 'Obi-Wan Kenobi'; }
-        else if (score >= 80) { rank = 'A'; title = 'Jedi Knight'; }
-        else if (score >= 60) { rank = 'B+'; title = 'Luke Skywalker'; }
-        else if (score >= 40) { rank = 'B'; title = 'Padawan'; }
-        else if (score >= 30) { rank = 'C+'; title = 'Youngling'; }
-        else if (score >= 20) { rank = 'C'; title = 'Initiate'; }
-        else if (score >= 15) { rank = 'C-'; title = 'Force Apprentice'; }
-        else if (score >= 10) { rank = 'D+'; title = 'Force Learner'; }
-        else if (score >= 5) { rank = 'D'; title = 'Force Novice'; }
-        else if (score >= 2) { rank = 'D-'; title = 'Force Newcomer'; }
+        if (score >= 800) { rank = 'S++'; title = 'Jedi'; }
+        else if (score >= 700) { rank = 'S+'; title = 'Master Yoda'; }
+        else if (score >= 600) { rank = 'S'; title = 'Grand Master'; }
+        else if (score >= 500) { rank = 'S-'; title = 'Jedi Master'; }
+        else if (score >= 400) { rank = 'S--'; title = 'Darth Vader'; }
+        else if (score >= 300) { rank = 'A+'; title = 'Obi-Wan Kenobi'; }
+        else if (score >= 250) { rank = 'A'; title = 'Jedi Knight'; }
+        else if (score >= 200) { rank = 'B+'; title = 'Luke Skywalker'; }
+        else if (score >= 150) { rank = 'B'; title = 'Padawan'; }
+        else if (score >= 100) { rank = 'C+'; title = 'Youngling'; }
+        else if (score >= 75) { rank = 'C'; title = 'Initiate'; }
+        else if (score >= 50) { rank = 'C-'; title = 'Force Apprentice'; }
+        else if (score >= 30) { rank = 'D+'; title = 'Force Learner'; }
+        else if (score >= 15) { rank = 'D'; title = 'Force Novice'; }
+        else if (score >= 5) { rank = 'D-'; title = 'Force Newcomer'; }
         else if (score >= 1) { rank = 'F+'; title = 'Force Initiate'; }
         else { rank = 'F'; title = 'Force Beginner'; }
 
