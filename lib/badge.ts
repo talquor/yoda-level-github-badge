@@ -32,11 +32,10 @@ const GALAXY_SVG = `
   </g>
 `;
 
-// Escape for element text
+// Escape helpers
 function escText(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-// Escape for attribute values (also escapes quotes)
 function escAttr(s: string) {
   return escText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -81,26 +80,26 @@ export function buildBadgeSVG(opts: {
     iconMarkup = GALAXY_SVG;
   }
 
-  // Subtle starfield + glow
+  // Subtle starfield + glow (use 0.x, not .x)
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="${escAttr(leftText)}: ${escAttr(rightTextUpper)}">
   <title>${escText(leftText)}: ${escText(rightTextUpper)}</title>
 
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
-      <stop offset="0" stop-color="#fff" stop-opacity=".05"/>
-      <stop offset="1" stop-opacity=".1"/>
+      <stop offset="0" stop-color="#fff" stop-opacity="0.05"/>
+      <stop offset="1" stop-opacity="0.10"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.9">
-      <stop offset="0" stop-color="${escAttr(rightColor)}" stop-opacity=".45"/>
-      <stop offset=".6" stop-color="${escAttr(rightColor)}" stop-opacity=".15"/>
-      <stop offset="1" stop-color="${escAttr(rightColor)}" stop-opacity="0"/>
+      <stop offset="0"   stop-color="${escAttr(rightColor)}" stop-opacity="0.45"/>
+      <stop offset="0.6" stop-color="${escAttr(rightColor)}" stop-opacity="0.15"/>
+      <stop offset="1"   stop-color="${escAttr(rightColor)}" stop-opacity="0"/>
     </radialGradient>
     <pattern id="stars" width="12" height="12" patternUnits="userSpaceOnUse">
-      <circle cx="2"  cy="3"  r=".6" fill="#9fb6ff" opacity=".45"/>
-      <circle cx="7"  cy="1.5"r=".5" fill="#bcd1ff" opacity=".35"/>
-      <circle cx="10" cy="7"  r=".7" fill="#e5e7eb" opacity=".4"/>
-      <circle cx="4"  cy="9.5"r=".4" fill="#d1d5db" opacity=".35"/>
+      <circle cx="2"  cy="3"   r="0.6" fill="#9fb6ff" opacity="0.45"/>
+      <circle cx="7"  cy="1.5" r="0.5" fill="#bcd1ff" opacity="0.35"/>
+      <circle cx="10" cy="7"   r="0.7" fill="#e5e7eb" opacity="0.40"/>
+      <circle cx="4"  cy="9.5" r="0.4" fill="#d1d5db" opacity="0.35"/>
     </pattern>
     <mask id="round">
       <rect width="${totalW}" height="${height}" rx="${radius}" fill="#fff"/>
@@ -110,7 +109,7 @@ export function buildBadgeSVG(opts: {
   <g mask="url(#round)">
     <!-- left -->
     <rect width="${leftW}" height="${height}" fill="${escAttr(leftColor)}"/>
-    <rect width="${leftW}" height="${height}" fill="url(#stars)" opacity=".35"/>
+    <rect width="${leftW}" height="${height}" fill="url(#stars)" opacity="0.35"/>
     <!-- right -->
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="${escAttr(rightColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="url(#glow)"/>
