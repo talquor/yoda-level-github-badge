@@ -2,7 +2,7 @@
 Generate a Star Wars-themed badge for your GitHub README!
 
 ## Demo
-![Yoda-Level Badge](https://yoda-level-github-badge-api.vercel.app/api/badge?user=cosminmemetea&rank=S++)[](https://github.com/cosminmemetea)
+[![Yoda-Level Badge](https://img.shields.io/badge/Yoda%20Rank-S%2B%2B%20(Jedi)-brightgreen?logo=github&logoColor=white&style=for-the-badge)](https://github.com/cosminmemetea)
 
 ## How to Use
 1. Visit [https://cosminmemetea.github.io/yoda-level-github-badge/](https://cosminmemetea.github.io/yoda-level-github-badge/).
@@ -10,11 +10,11 @@ Generate a Star Wars-themed badge for your GitHub README!
 3. Copy the Markdown for your README or share the animated GIF on social media!
 
 ## Ranking System
-- **S++ (Jedi)**: 98–100 points (~160 commits or ~22 PRs in 30 days).
-- **S+, S, S-, S--**: Master Yoda, Grand Master, Jedi Master, Darth Vader.
-- **A+, A**: Obi-Wan Kenobi, Jedi Knight.
-- **B+, B, C+, C, C-, D+, D, D-, F+, F**: From Luke Skywalker to Force Beginner.
-- Score: Commits * 0.6 + PRs * 4 (last 30 days).
+- **S++ (Jedi)**: ≥200 points (e.g., ~1000 commits or ~100 PRs in 30 days).
+- **S+, S, S-, S--**: 180–199, 160–179, 140–159, 120–139 points.
+- **A+, A**: 100–119, 80–99 points.
+- **B+, B, C+, C, C-, D+, D, D-, F+, F**: 60–79, 40–59, 30–39, 20–29, 15–19, 10–14, 5–9, 2–4, 1, 0 points.
+- Score: log10(0.8 * Commits + 8 * PRs + 1) * 100 (last 30 days, up to 100 repos).
 
 ## Contribute
 - Add new ranks in `js/badge.js`.
@@ -22,7 +22,7 @@ Generate a Star Wars-themed badge for your GitHub README!
 - Fork and submit a PR!
 
 ## Deployment
-Hosted on GitHub Pages. API powered by Vercel.
+Hosted on GitHub Pages.
 
 ## License
 This project is licensed under the [MIT License](LICENSE).
