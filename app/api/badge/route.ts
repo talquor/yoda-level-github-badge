@@ -6,7 +6,7 @@ export const runtime = 'edge';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  const label   = searchParams.get('label')   ?? 'Yoda Rank';
+  const label   = searchParams.get('label')   ?? 'Rank';
   const persona = searchParams.get('persona') ?? '';
   const grade   = searchParams.get('grade')   ?? '';
   const pointsQ = searchParams.get('points');

@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   }
 
   const badge = searchParams.get('badge') === '1';
-  const label = searchParams.get('label') ?? 'Yoda Rank';
+  const label = searchParams.get('label') ?? 'Rank';
   const logo = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
 
   const granular = searchParams.get('granular') === '1';

@@ -1,7 +1,7 @@
 # 🛡️ Yoda Level GitHub Badge
 
 Turn GitHub activity into a **cinematic, Shields-style badge**.  
-Format: **Yoda Rank: Jedi (S++)** — same vibe as “for-the-badge”, but custom.
+Format: **Rank: Jedi (S++)** — same vibe as “for-the-badge”, but custom.
 
 <div align="center">
   <img alt="Demo Badge" src="https://YOUR-APP.vercel.app/api/badge?label=Yoda%20Rank&persona=Jedi&grade=S%2B%2B&logo=saber" />
@@ -25,21 +25,21 @@ Format: **Yoda Rank: Jedi (S++)** — same vibe as “for-the-badge”, but cust
 **Auto-computed from GitHub history (recommended):**
 
 ```md
-![Yoda Rank](https://YOUR-APP.vercel.app/api/user-rank?username=cosminmemetea&badge=1&label=Yoda%20Rank&logo=saber)
+![Rank](https://YOUR-APP.vercel.app/api/user-rank?username=cosminmemetea&badge=1&label=Yoda%20Rank&logo=saber)
 ```
 
 ```md
-![Yoda Rank](https://YOUR-APP.vercel.app/api/user-rank?username=torvalds&badge=1&label=Yoda%20Rank&logo=galaxy)
+![Rank](https://YOUR-APP.vercel.app/api/user-rank?username=torvalds&badge=1&label=Yoda%20Rank&logo=galaxy)
 ```
 
 **Manual (fixed values or by points):**
 
 ```md
-![Yoda Rank](https://YOUR-APP.vercel.app/api/badge?label=Yoda%20Rank&persona=Jedi&grade=S%2B%2B&logo=galaxy)
+![Rank](https://YOUR-APP.vercel.app/api/badge?label=Yoda%20Rank&persona=Jedi&grade=S%2B%2B&logo=galaxy)
 ```
 
 ```md
-![Yoda Rank](https://YOUR-APP.vercel.app/api/badge?points=98&label=Yoda%20Rank&logo=saber)
+![Rank](https://YOUR-APP.vercel.app/api/badge?points=98&label=Yoda%20Rank&logo=saber)
 ```
 
 > Replace `YOUR-APP` with your Vercel domain.
@@ -51,7 +51,7 @@ Format: **Yoda Rank: Jedi (S++)** — same vibe as “for-the-badge”, but cust
 ### `/api/user-rank`
 - `username` *(required)* – GitHub login, e.g. `octocat`
 - `badge=1` – return the **SVG badge** instead of JSON
-- `label` – left text (default: `Yoda Rank`)
+- `label` – left text (default: `Rank`)
 - `logo` – `saber` | `galaxy` | `github`
 - `t` – cache buster (any value) to force refresh
 
@@ -66,7 +66,7 @@ Example badge:
 ```
 
 ### `/api/badge`
-- `label` – left text (default: `Yoda Rank`)
+- `label` – left text (default: `Rank`)
 - `persona` – e.g. `Jedi`
 - `grade` – e.g. `S++`
 - `points` – `0..100` (auto maps to persona/grade/color)

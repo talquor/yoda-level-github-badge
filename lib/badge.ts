@@ -55,7 +55,7 @@ export function buildBadgeSVG(opts: {
     icon = 'saber'
   } = opts;
 
-  const leftText = (label || 'Yoda Rank').toUpperCase();
+  const leftText = (label || 'Rank').toUpperCase();
   const rightTextUpper = (rightText || 'MASTER YODA (S++)').toUpperCase();
 
   // for-the-badge sizing

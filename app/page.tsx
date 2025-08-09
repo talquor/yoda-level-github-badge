@@ -19,14 +19,14 @@ export default function Page() {
 
         <h3>Usage</h3>
         <p>Put this in your README:</p>
-        <pre><code>![Yoda Rank](https://your-vercel-app.vercel.app/api/badge?label=Yoda%20Rank&amp;persona=Jedi&amp;grade=S%2B%2B&amp;logo=github)</code></pre>
+        <pre><code>![Rank](https://your-vercel-app.vercel.app/api/badge?label=Yoda%20Rank&amp;persona=Jedi&amp;grade=S%2B%2B&amp;logo=github)</code></pre>
 
         <p>Or auto-map by points:</p>
-        <pre><code>![Yoda Rank](https://your-vercel-app.vercel.app/api/badge?points=98&amp;logo=github)</code></pre>
+        <pre><code>![Rank](https://your-vercel-app.vercel.app/api/badge?points=98&amp;logo=github)</code></pre>
 
         <h3>Query params</h3>
         <ul>
-          <li><code>label</code> – left text (default: <code>Yoda Rank</code>)</li>
+          <li><code>label</code> – left text (default: <code>Rank</code>)</li>
           <li><code>persona</code> – e.g. <code>Jedi</code></li>
           <li><code>grade</code> – e.g. <code>S++</code></li>
           <li><code>points</code> – 0..100 (auto maps to persona/grade/color)</li>
