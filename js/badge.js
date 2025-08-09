@@ -6,10 +6,11 @@ export async function generateBadge() {
     const username = document.getElementById('username')?.value?.trim() || '';
     const token = document.getElementById('token')?.value?.trim() || '';
     const resultElement = document.getElementById('result');
+    const markdownElement = document.getElementById('markdown');
 
-    if (!resultElement) {
-        alert('Internal error: Result area missing. Reload the page.');
-        console.error('Result element not found');
+    if (!resultElement || !markdownElement) {
+        alert('Internal error: UI elements missing. Reload the page.');
+        console.error('Result or Markdown element not found');
         return;
     }
 
@@ -25,11 +26,11 @@ export async function generateBadge() {
     const cacheKey = `badge_${username}`;
     const cachedData = getCachedData(cacheKey);
     if (cachedData) {
-        const { score, rank, title } = cachedData;
+        const { rank, title } = cachedData;
         setBadgeData(rank, title);
         const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=${encodeURIComponent(rank)}`;
-        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
-        updateMarkdown(markdown);
+        markdownElement.value = `[![Yoda-Level Badge](${badgeUrl})](https://github.com/${encodeURIComponent(username)})`;
+        resultElement.classList.remove('hidden');
         return;
     }
 
@@ -70,28 +71,15 @@ export async function generateBadge() {
 
         setBadgeData(rank, title);
         const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=${encodeURIComponent(rank)}`;
-        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
-        updateMarkdown(markdown);
+        markdownElement.value = `[![Yoda-Level Badge](${badgeUrl})](https://github.com/${encodeURIComponent(username)})`;
+        resultElement.classList.remove('hidden');
 
-        setCachedData(cacheKey, { score, rank, title });
+        setCachedData(cacheKey, { rank, title });
     } catch (error) {
         setBadgeData('F', 'Force Beginner');
-        const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=F`;
-        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
-        updateMarkdown(markdown);
+        markdownElement.value = `[![Yoda-Level Badge](https://yoda-level-github-badge-api.vercel.app/api/badge?user=invalid&rank=F)](https://github.com)`;
+        resultElement.classList.remove('hidden');
         alert(`Error fetching data: ${error.message}`);
         console.error(error);
-    }
-}
-
-function updateMarkdown(markdown) {
-    const markdownElement = document.getElementById('markdown');
-    if (markdownElement) {
-        markdownElement.value = markdown;
-        const resultElement = document.getElementById('result');
-        if (resultElement) resultElement.classList.remove('hidden');
-    } else {
-        alert('Error: Could not update Markdown.');
-        console.error('Markdown element not found');
     }
 }
