@@ -28,12 +28,8 @@ export async function generateBadge() {
         const { score, rank, title } = cachedData;
         setBadgeData(rank, title);
         const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=${encodeURIComponent(rank)}`;
-        const markdown = `![Yoda-Level Badge](${badgeUrl})[](https://github.com/${encodeURIComponent(username)})`;
-        const markdownElement = document.getElementById('markdown');
-        if (markdownElement) {
-            markdownElement.value = markdown;
-            resultElement.classList.remove('hidden');
-        }
+        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
+        updateMarkdown(markdown);
         return;
     }
 
@@ -74,20 +70,28 @@ export async function generateBadge() {
 
         setBadgeData(rank, title);
         const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=${encodeURIComponent(rank)}`;
-        const markdown = `![Yoda-Level Badge](${badgeUrl})[](https://github.com/${encodeURIComponent(username)})`;
-        const markdownElement = document.getElementById('markdown');
-        if (markdownElement) {
-            markdownElement.value = markdown;
-            resultElement.classList.remove('hidden');
-        } else {
-            alert('Error: Could not generate Markdown.');
-            console.error('Markdown element not found');
-        }
+        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
+        updateMarkdown(markdown);
 
         setCachedData(cacheKey, { score, rank, title });
     } catch (error) {
         setBadgeData('F', 'Force Beginner');
+        const badgeUrl = `https://yoda-level-github-badge-api.vercel.app/api/badge?user=${encodeURIComponent(username)}&rank=F`;
+        const markdown = `![Yoda-Level Badge](${badgeUrl})`;
+        updateMarkdown(markdown);
         alert(`Error fetching data: ${error.message}`);
         console.error(error);
+    }
+}
+
+function updateMarkdown(markdown) {
+    const markdownElement = document.getElementById('markdown');
+    if (markdownElement) {
+        markdownElement.value = markdown;
+        const resultElement = document.getElementById('result');
+        if (resultElement) resultElement.classList.remove('hidden');
+    } else {
+        alert('Error: Could not update Markdown.');
+        console.error('Markdown element not found');
     }
 }
