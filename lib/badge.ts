@@ -32,14 +32,19 @@ const GALAXY_SVG = `
   </g>
 `;
 
-function esc(s: string) {
+// Escape for element text
+function escText(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Escape for attribute values (also escapes quotes)
+function escAttr(s: string) {
+  return escText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 export function buildBadgeSVG(opts: {
   label: string;
   rightText: string;        // e.g., "MASTER YODA (S++)"
-  rightColor: string;       // hex
+  rightColor: string;       // hex like #22c55e
   leftColor?: string;       // sky-war slate
   icon?: 'github' | 'saber' | 'galaxy';
 }) {
@@ -47,12 +52,12 @@ export function buildBadgeSVG(opts: {
     label,
     rightText,
     rightColor,
-    leftColor = '#141a2a',   // deeper space blue
+    leftColor = '#141a2a',
     icon = 'saber'
   } = opts;
 
-  const leftText = label.toUpperCase();
-  const rightTextUpper = rightText.toUpperCase();
+  const leftText = (label || 'Yoda Rank').toUpperCase();
+  const rightTextUpper = (rightText || 'MASTER YODA (S++)').toUpperCase();
 
   // for-the-badge sizing
   const padX = 14;
@@ -76,10 +81,10 @@ export function buildBadgeSVG(opts: {
     iconMarkup = GALAXY_SVG;
   }
 
-  // subtle starfield on the left; glow on the right
+  // Subtle starfield + glow
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="${esc(leftText)}: ${esc(rightTextUpper)}">
-  <title>${esc(leftText)}: ${esc(rightTextUpper)}</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="${escAttr(leftText)}: ${escAttr(rightTextUpper)}">
+  <title>${escText(leftText)}: ${escText(rightTextUpper)}</title>
 
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
@@ -87,9 +92,9 @@ export function buildBadgeSVG(opts: {
       <stop offset="1" stop-opacity=".1"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.9">
-      <stop offset="0" stop-color="${rightColor}" stop-opacity=".45"/>
-      <stop offset=".6" stop-color="${rightColor}" stop-opacity=".15"/>
-      <stop offset="1" stop-color="${rightColor}" stop-opacity="0"/>
+      <stop offset="0" stop-color="${escAttr(rightColor)}" stop-opacity=".45"/>
+      <stop offset=".6" stop-color="${escAttr(rightColor)}" stop-opacity=".15"/>
+      <stop offset="1" stop-color="${escAttr(rightColor)}" stop-opacity="0"/>
     </radialGradient>
     <pattern id="stars" width="12" height="12" patternUnits="userSpaceOnUse">
       <circle cx="2"  cy="3"  r=".6" fill="#9fb6ff" opacity=".45"/>
@@ -103,25 +108,24 @@ export function buildBadgeSVG(opts: {
   </defs>
 
   <g mask="url(#round)">
-    <!-- left space panel -->
-    <rect width="${leftW}" height="${height}" fill="${leftColor}"/>
+    <!-- left -->
+    <rect width="${leftW}" height="${height}" fill="${escAttr(leftColor)}"/>
     <rect width="${leftW}" height="${height}" fill="url(#stars)" opacity=".35"/>
-    <!-- right rank panel -->
-    <rect x="${leftW}" width="${rightW}" height="${height}" fill="${rightColor}"/>
+    <!-- right -->
+    <rect x="${leftW}" width="${rightW}" height="${height}" fill="${escAttr(rightColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="url(#glow)"/>
-    <!-- soft glossy overlay -->
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
   </g>
 
   <g aria-hidden="true" fill="#fff" text-rendering="geometricPrecision"
      font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
     ${hasIcon ? iconMarkup : ''}
-    <text x="${hasIcon ? 26 : 12}" y="19">${esc(leftText)}</text>
+    <text x="${hasIcon ? 26 : 12}" y="19">${escText(leftText)}</text>
   </g>
 
   <g aria-hidden="true" fill="#fff" text-rendering="geometricPrecision"
      font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${leftW + padX}" y="19">${esc(rightTextUpper)}</text>
+    <text x="${leftW + padX}" y="19">${escText(rightTextUpper)}</text>
   </g>
 </svg>`.trim();
 

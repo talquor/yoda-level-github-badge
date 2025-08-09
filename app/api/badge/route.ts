@@ -1,3 +1,4 @@
+// app/api/badge/route.ts
 import { pickTierByPoints } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
 
@@ -19,13 +20,12 @@ export async function GET(req: Request) {
 
   if (pointsQ !== null) {
     const p = Number(pointsQ);
-    const tier = pickTierByPoints(isNaN(p) ? 0 : p);
-    rightPersona = tier.name;
-    rightGrade   = tier.grade;
-    rightColor   = tier.color;
+    const t = pickTierByPoints(isNaN(p) ? 0 : p);
+    rightPersona = t.name;
+    rightGrade   = t.grade;
+    rightColor   = t.color;
   }
 
-  // defaults (S++ look)
   rightPersona ||= 'Master Yoda';
   rightGrade   ||= 'S++';
   rightColor   ||= '#22c55e';
@@ -41,8 +41,8 @@ export async function GET(req: Request) {
 
   return new Response(svg, {
     headers: {
-      "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": "public, max-age=0, s-maxage=3600, must-revalidate"
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=0, s-maxage=3600, must-revalidate'
     }
   });
 }
