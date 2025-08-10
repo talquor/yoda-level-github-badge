@@ -4,7 +4,17 @@ Turn GitHub activity into a **cinematic, Shields-style badge**.
 Format: **Rank: Jedi (S++)** — same vibe as “for-the-badge”, but custom.
 
 <div align="center">
-  <img alt="Demo Badge" src="https://YOUR-APP.vercel.app/api/badge?label=Yoda%20Rank&persona=Jedi&grade=S%2B%2B&logo=saber" />
+
+Granular + dots XP (default) + points + next
+![Yoda Rank](https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea&badge=1&logo=galaxy&granular=1&showPoints=1&showNext=1)
+
+Granular + bar XP
+![Yoda Rank](https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea&badge=1&logo=saber&granular=1&xp=bar&showPoints=1)
+
+
+Manual points + bar XP
+![Yoda Rank](https://yoda-level-github-badge.vercel.app/api/badge?points=82.5&label=Yoda%20Rank&logo=galaxy&granular=1&xp=bar&showPoints=1&showNext=1)
+
 </div>
 
 ---

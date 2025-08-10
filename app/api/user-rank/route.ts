@@ -1,6 +1,6 @@
 import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '@/lib/github';
 import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
-import { pickTierByPoints, TIERS, tierWithBand } from '@/lib/rank';
+import { TIERS, tierWithBand } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
 
 export const runtime = 'edge';
@@ -16,12 +16,13 @@ export async function GET(req: Request) {
   }
 
   const badge = searchParams.get('badge') === '1';
-  const label = searchParams.get('label') ?? 'Rank';
+  const label = searchParams.get('label') ?? 'Yoda Rank';
   const logo = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
 
-  const granular = searchParams.get('granular') === '1';
+  const granular   = searchParams.get('granular') === '1';
   const showPoints = searchParams.get('showPoints') === '1';
-  const showNext = searchParams.get('showNext') === '1';
+  const showNext   = searchParams.get('showNext') === '1';
+  const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
 
   const token = process.env.GITHUB_TOKEN;
 
@@ -70,23 +71,23 @@ export async function GET(req: Request) {
 
   points = applyLegendOverride(username, points, approxStars, approxFollowers);
 
-  // Build right-hand text with optional band/points/next
-  const { tier, bandRoman, nextTier, pointsToNext } = tierWithBand(points);
+  const { tier, bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(points);
+  const progressRatio = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
+
   const baseRight = granular ? `${tier.name} (${tier.grade}) • ${bandRoman}` : `${tier.name} (${tier.grade})`;
   const parts = [baseRight];
   if (showPoints) parts.push(`${points.toFixed(1)} pts`);
-  if (showNext && nextTier && pointsToNext !== undefined) {
-    parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
-  }
+  if (showNext && nextTier && pointsToNext !== undefined) parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
   const rightText = parts.join(' • ');
-  const rightColor = tier.color;
 
   if (badge) {
     const { svg } = buildBadgeSVG({
       label,
       rightText,
-      rightColor,
-      icon: logo
+      rightColor: tier.color,
+      icon: logo,
+      progressRatio: xpParam === 'none' ? undefined : progressRatio,
+      progressVariant: xpParam === 'bar' ? 'bar' : 'dots'
     });
     return new Response(svg, {
       headers: {
@@ -104,7 +105,7 @@ export async function GET(req: Request) {
     persona: tier.name,
     color: tier.color,
     method: used,
-    granular: granular ? { band: bandRoman, nextTier: nextTier?.name, pointsToNext } : undefined,
+    granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
     tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

@@ -6,15 +6,16 @@ export const runtime = 'edge';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  const label   = searchParams.get('label')   ?? 'Rank';
+  const label   = searchParams.get('label')   ?? 'Yoda Rank';
   const persona = searchParams.get('persona') ?? '';
   const grade   = searchParams.get('grade')   ?? '';
   const pointsQ = searchParams.get('points');
   const color   = searchParams.get('color')   ?? '';
   const logo    = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
-  const granular = searchParams.get('granular') === '1';
+  const granular   = searchParams.get('granular') === '1';
   const showPoints = searchParams.get('showPoints') === '1';
-  const showNext = searchParams.get('showNext') === '1';
+  const showNext   = searchParams.get('showNext') === '1';
+  const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
 
   let rightPersona = persona;
   let rightGrade   = grade;
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
     rightPersona = t.name;
     rightGrade   = t.grade;
     rightColor   = t.color;
-    points = isNaN(p) ? 0 : p;
+    points = isNaN(p) ? 0 : Math.max(0, Math.min(100, p));
   }
 
   rightPersona ||= 'Master Yoda';
@@ -35,15 +36,15 @@ export async function GET(req: Request) {
   rightColor   ||= '#22c55e';
 
   let rightText = `${rightPersona} (${rightGrade})`;
+  let progressRatio: number | undefined = undefined;
 
   if (granular) {
     const p = points ?? (rightGrade === 'S++' ? 99 : 80);
-    const { bandRoman, nextTier, pointsToNext } = tierWithBand(p);
+    const { bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(p);
+    progressRatio = (pctToNext ?? 0) / 100;
     const parts = [`${rightPersona} (${rightGrade}) • ${bandRoman}`];
     if (showPoints) parts.push(`${p.toFixed(1)} pts`);
-    if (showNext && nextTier && pointsToNext !== undefined) {
-      parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
-    }
+    if (showNext && nextTier && pointsToNext !== undefined) parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
     rightText = parts.join(' • ');
   } else if (showPoints && points !== null) {
     rightText = `${rightText} • ${points.toFixed(1)} pts`;
@@ -53,7 +54,9 @@ export async function GET(req: Request) {
     label,
     rightText,
     rightColor,
-    icon: logo
+    icon: logo,
+    progressRatio: xpParam === 'none' ? undefined : progressRatio,
+    progressVariant: xpParam === 'bar' ? 'bar' : 'dots'
   });
 
   return new Response(svg, {
