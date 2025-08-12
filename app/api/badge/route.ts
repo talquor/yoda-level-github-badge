@@ -16,6 +16,7 @@ export async function GET(req: Request) {
   const showPoints = searchParams.get('showPoints') === '1';
   const showNext   = searchParams.get('showNext') === '1';
   const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
+  const theme      = (searchParams.get('theme') ?? 'jedi') as 'jedi' | 'sith';
 
   let rightPersona = persona;
   let rightGrade   = grade;
@@ -56,7 +57,8 @@ export async function GET(req: Request) {
     rightColor,
     icon: logo,
     progressRatio: xpParam === 'none' ? undefined : progressRatio,
-    progressVariant: xpParam === 'bar' ? 'bar' : 'dots'
+    progressVariant: xpParam === 'bar' ? 'bar' : 'dots',
+    theme
   });
 
   return new Response(svg, {

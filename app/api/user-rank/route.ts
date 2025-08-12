@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   const badge = searchParams.get('badge') === '1';
   const label = searchParams.get('label') ?? 'Rank';
   const logo = (searchParams.get('logo') ?? 'saber') as 'github' | 'saber' | 'galaxy';
+  const theme = (searchParams.get('theme') ?? 'jedi') as 'jedi' | 'sith';
 
   const granular   = searchParams.get('granular') === '1';
   const showPoints = searchParams.get('showPoints') === '1';
@@ -87,7 +88,8 @@ export async function GET(req: Request) {
       rightColor: tier.color,
       icon: logo,
       progressRatio: xpParam === 'none' ? undefined : progressRatio,
-      progressVariant: xpParam === 'bar' ? 'bar' : 'dots'
+      progressVariant: xpParam === 'bar' ? 'bar' : 'dots',
+      theme
     });
     return new Response(svg, {
       headers: {
@@ -105,8 +107,7 @@ export async function GET(req: Request) {
     persona: tier.name,
     color: tier.color,
     method: used,
-    granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
-    tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
+    granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext }
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   });
