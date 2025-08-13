@@ -9,9 +9,9 @@
 
 export type DayCount = { date: string; count: number }; // ISO date (YYYY-MM-DD), non-negative count
 
-/** Normalize an ISO date string to YYYY-MM-DD (UTC) */
-export function toYMD(d: string | Date): string {
-  const dt = new Date(d);
+/** Normalize an input to Date and format as YYYY-MM-DD (UTC) */
+export function toYMD(d: string | number | Date): string {
+  const dt = typeof d === 'number' ? new Date(d) : new Date(d);
   const y = dt.getUTCFullYear();
   const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(dt.getUTCDate()).padStart(2, '0');
@@ -29,7 +29,7 @@ export function normalizeDays(raw: DayCount[], minDate: string, maxDate: string)
   const end = new Date(maxDate + 'T00:00:00Z').getTime();
   const dayMs = 86400000;
   while (cur <= end) {
-    const ymd = toYMD(cur);
+    const ymd = toYMD(cur); // cur is a number (ms) — now supported
     out.push({ date: ymd, count: map.get(ymd) ?? 0 });
     cur += dayMs;
   }
@@ -51,16 +51,14 @@ function rollingSum(arr: number[], window = 7): number[] {
 /**
  * Compute streak days:
  * - Build rolling 7-day sums
- * - Find last index with data (usually last day)
+ * - Start at the last day
  * - Count how many consecutive steps going backward keep strictly increasing vs previous day
  */
 export function computeStreakDays(days: DayCount[]): number {
   if (!days.length) return 0;
   const counts = days.map(d => Math.max(0, d.count || 0));
   const roll = rollingSum(counts, 7);
-  // Start from the last day that has any data in the window (non-NaN always with our rolling)
   let i = roll.length - 1;
-  // Streak counts how many consecutive deltas are > 0 when stepping backward
   let streak = 0;
   while (i > 0) {
     const today = roll[i];
@@ -73,24 +71,23 @@ export function computeStreakDays(days: DayCount[]): number {
 }
 
 /**
- * Helper to convert GitHub contribution calendar (GraphQL) to DayCount[]
+ * Convert GitHub contribution calendar (GraphQL) → DayCount[]
  */
-export function fromContributionCalendar(weeks: Array<{ contributionDays: Array<{ date: string; contributionCount: number }> }>): DayCount[] {
+export function fromContributionCalendar(
+  weeks: Array<{ contributionDays: Array<{ date: string; contributionCount: number }> }>
+): DayCount[] {
   const out: DayCount[] = [];
   for (const w of weeks) {
     for (const d of w.contributionDays) {
       out.push({ date: toYMD(d.date), count: d.contributionCount || 0 });
     }
   }
-  // They are already chronological by week/day; we’ll sort just in case.
   out.sort((a, b) => a.date.localeCompare(b.date));
   return out;
 }
 
 /**
- * Helper to convert REST Events to DayCount[] (coarse approximation).
- * We count events per day for the last N days; it’s a weaker signal than GraphQL calendar
- * but lets us compute a streak without a token.
+ * Convert REST Events → DayCount[] (approx). Counts events per day for last N days.
  */
 export function fromEvents(events: Array<{ created_at: string }>, daysBack = 90): DayCount[] {
   const dayMs = 86400000;
@@ -103,15 +100,12 @@ export function fromEvents(events: Array<{ created_at: string }>, daysBack = 90)
     const ymd = toYMD(e.created_at);
     buckets.set(ymd, (buckets.get(ymd) || 0) + 1);
   }
-  const minYMD = toYMD(startMs);
-  const maxYMD = toYMD(today);
   const list: DayCount[] = [];
   let cur = startMs;
   while (cur <= today.getTime()) {
-    const ymd = toYMD(cur);
+    const ymd = toYMD(cur); // cur is a number — now supported
     list.push({ date: ymd, count: buckets.get(ymd) || 0 });
     cur += dayMs;
   }
-  // Normalize already generates full range; return as-is
   return list;
 }
