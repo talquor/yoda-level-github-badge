@@ -105,3 +105,56 @@ export async function fetchUserMetricsGraphQL(username: string, token?: string):
     repoContribs: u.contributionsCollection.totalRepositoryContributions,
   };
 }
+
+// lib/github.ts 
+/**
+ * Fetch the GitHub contribution calendar (daily counts) for a user
+ * for the past `daysBack` days (default 120).
+ * Requires a GraphQL token in process.env.GITHUB_TOKEN (or passed in).
+ */
+export async function fetchContributionCalendar(username: string, token?: string, daysBack = 120) {
+  const auth = token || process.env.GITHUB_TOKEN;
+  if (!auth) return null; // no token → caller should fallback to REST events
+
+  const dayMs = 86400000;
+  const to = new Date();
+  const from = new Date(to.getTime() - daysBack * dayMs);
+
+  const query = `
+    query($login: String!, $from: DateTime!, $to: DateTime!) {
+      user(login: $login) {
+        contributionsCollection(from: $from, to: $to) {
+          contributionCalendar {
+            weeks {
+              contributionDays {
+                date
+                contributionCount
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const resp = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${auth}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query,
+      variables: { login: username, from: from.toISOString(), to: to.toISOString() }
+    })
+  });
+
+  if (!resp.ok) {
+    // Swallow errors; caller will fallback
+    return null;
+  }
+  const data = await resp.json();
+  const weeks = data?.data?.user?.contributionsCollection?.contributionCalendar?.weeks;
+  if (!weeks) return null;
+  return weeks as Array<{ contributionDays: Array<{ date: string; contributionCount: number }> }>;
+}
