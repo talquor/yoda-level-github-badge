@@ -1,4 +1,5 @@
 import { textWidth } from './rank';
+import { themeColors, type Theme } from './theme';
 
 /** GitHub mark (kept as an option) */
 const GH_LOGO_PATH =
@@ -40,29 +41,44 @@ function escAttr(s: string) {
   return escText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// XP color ramp
+function xpColorFor(pr: number, theme: Theme): string {
+  if (theme === 'sith') {
+    if (pr < 0.25) return '#ef4444';
+    if (pr < 0.50) return '#f97316';
+    if (pr < 0.75) return '#f59e0b';
+    return '#facc15';
+  }
+  if (pr < 0.25) return '#ef4444';
+  if (pr < 0.50) return '#f59e0b';
+  if (pr < 0.75) return '#a3e635';
+  return '#22c55e';
+}
+
 export function buildBadgeSVG(opts: {
-  label: string;
+  label?: string;                 // default "Rank"
   rightText: string;              // e.g., "JEDI KNIGHT (A) • II • 82.5 PTS"
   rightColor: string;             // hex like #22c55e
-  leftColor?: string;             // sky-war slate
   icon?: 'github' | 'saber' | 'galaxy';
   progressRatio?: number;         // 0..1 progress within current tier
   progressVariant?: 'dots' | 'bar';
+  theme?: Theme;                  // 'jedi' | 'sith'
 }) {
   const {
-    label,
+    label = 'Rank',
     rightText,
     rightColor,
-    leftColor = '#141a2a',
     icon = 'saber',
     progressRatio,
-    progressVariant = 'dots'
+    progressVariant = 'dots',
+    theme = 'jedi'
   } = opts;
 
-  const leftText = (label || 'Yoda Rank').toUpperCase();
+  const tc = themeColors(theme);
+  const leftText = (label || 'Rank').toUpperCase();
   const rightTextUpper = (rightText || 'MASTER YODA (S++)').toUpperCase();
 
-  // for-the-badge sizing
+  // dimensions
   const padX = 14;
   const height = 28;
   const radius = 4;
@@ -80,39 +96,38 @@ export function buildBadgeSVG(opts: {
   else if (icon === 'saber') iconMarkup = SABER_SVG;
   else if (icon === 'galaxy') iconMarkup = GALAXY_SVG;
 
-  // XP progress visuals
-  const pr = Math.max(0, Math.min(1, progressRatio ?? 0)); // clamp
+  // XP visuals
+  const pr = Math.max(0, Math.min(1, progressRatio ?? 0));
+  const xpColor = xpColorFor(pr, theme);
   let xpMarkup = '';
   if (progressRatio !== undefined) {
     if (progressVariant === 'bar') {
-      // Thin bar at bottom of right panel (height 3)
-      const barH = 3;
-      const barY = height - barH;
+      const barH = 3, barY = height - barH;
       const filledW = Math.round(rightW * pr);
       xpMarkup = `
         <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="rgba(0,0,0,0.22)"/>
-        <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="#ffffff" opacity="0.85"/>
+        <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${escAttr(xpColor)}" opacity="0.95"/>
       `;
     } else {
-      // 4 dots centered under the right text baseline area
       const dots = 4;
-      const cx0 = leftW + padX;           // start near text start
-      const usable = rightW - padX * 2;   // space for dots row
+      const cx0 = leftW + padX;
+      const usable = rightW - padX * 2;
       const gap = usable / (dots + 1);
       const filled = Math.round(pr * dots);
-      const cy = 22;                      // slightly below text
-      const r = 0.9;                      // tiny
+      const cy = 22;
+      const r = 0.9;
       const pieces: string[] = [];
       for (let i = 1; i <= dots; i++) {
         const cx = cx0 + gap * i;
         const isFilled = i <= filled;
-        pieces.push(`<circle cx="${cx.toFixed(2)}" cy="${cy}" r="${r}" fill="#ffffff" opacity="${isFilled ? '0.95' : '0.35'}"/>`);
+        pieces.push(
+          `<circle cx="${cx.toFixed(2)}" cy="${cy}" r="${r}" fill="${isFilled ? escAttr(xpColor) : '#ffffff'}" opacity="${isFilled ? '0.95' : '0.35'}"/>`
+        );
       }
       xpMarkup = pieces.join('\n');
     }
   }
 
-  // Starfield + glow
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="${escAttr(leftText)}: ${escAttr(rightTextUpper)}">
   <title>${escText(leftText)}: ${escText(rightTextUpper)}</title>
@@ -128,10 +143,10 @@ export function buildBadgeSVG(opts: {
       <stop offset="1"   stop-color="${escAttr(rightColor)}" stop-opacity="0"/>
     </radialGradient>
     <pattern id="stars" width="12" height="12" patternUnits="userSpaceOnUse">
-      <circle cx="2"  cy="3"   r="0.6" fill="#9fb6ff" opacity="0.45"/>
-      <circle cx="7"  cy="1.5" r="0.5" fill="#bcd1ff" opacity="0.35"/>
-      <circle cx="10" cy="7"   r="0.7" fill="#e5e7eb" opacity="0.40"/>
-      <circle cx="4"  cy="9.5" r="0.4" fill="#d1d5db" opacity="0.35"/>
+      <circle cx="2"  cy="3"   r="0.6" fill="${tc.starA}" opacity="0.45"/>
+      <circle cx="7"  cy="1.5" r="0.5" fill="${tc.starB}" opacity="0.35"/>
+      <circle cx="10" cy="7"   r="0.7" fill="${tc.starC}" opacity="0.40"/>
+      <circle cx="4"  cy="9.5" r="0.4" fill="${tc.starD}" opacity="0.35"/>
     </pattern>
     <mask id="round">
       <rect width="${totalW}" height="${height}" rx="${radius}" fill="#fff"/>
@@ -140,7 +155,7 @@ export function buildBadgeSVG(opts: {
 
   <g mask="url(#round)">
     <!-- left -->
-    <rect width="${leftW}" height="${height}" fill="${escAttr(leftColor)}"/>
+    <rect width="${leftW}" height="${height}" fill="${escAttr(tc.leftColor)}"/>
     <rect width="${leftW}" height="${height}" fill="url(#stars)" opacity="0.35"/>
     <!-- right -->
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="${escAttr(rightColor)}"/>

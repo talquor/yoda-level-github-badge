@@ -136,3 +136,9 @@ npm run dev
 ## 🧾 License
 
 MIT – customize, remix, and have fun.
+
+
+docker build -t yoda-badge:local .
+docker run -d --name yoda-badge -p 3000:3000 yoda-badge:local
+
+
