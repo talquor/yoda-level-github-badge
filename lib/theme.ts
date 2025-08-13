@@ -1,16 +1,18 @@
+// lib/theme.ts
 export type Theme = 'jedi' | 'sith';
 
 export function themeColors(theme: Theme) {
   if (theme === 'sith') {
     return {
-      leftColor: '#1a0f14',     // deep crimson black
+      // left panel color + starfield accents for Sith
+      leftColor: '#1a0f14',
       starA: '#ffb4b4',
       starB: '#ffd4d4',
       starC: '#ffe1e1',
       starD: '#ffc6c6'
     };
   }
-  // default: jedi (space blue)
+  // default Jedi/space-blue palette
   return {
     leftColor: '#141a2a',
     starA: '#9fb6ff',
