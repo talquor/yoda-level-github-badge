@@ -1,7 +1,9 @@
-import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL } from '@/lib/github';
+// app/api/user-rank/route.ts
+import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL, fetchContributionCalendar } from '@/lib/github';
 import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
 import { TIERS, tierWithBand } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
+import { computeStreakDays, fromContributionCalendar, fromEvents, normalizeDays, toYMD } from '@/lib/streak';
 
 export const runtime = 'edge';
 
@@ -24,6 +26,10 @@ export async function GET(req: Request) {
   const showPoints = searchParams.get('showPoints') === '1';
   const showNext   = searchParams.get('showNext') === '1';
   const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
+
+  // NEW: add ?streak=1 to show level-up streak (days)
+  const showStreak = searchParams.get('streak') === '1';
+  const streakDaysBack = Math.max(30, Math.min(365, parseInt(searchParams.get('streakWindow') || '120', 10) || 120));
 
   const token = process.env.GITHUB_TOKEN;
 
@@ -75,10 +81,34 @@ export async function GET(req: Request) {
   const { tier, bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(points);
   const progressRatio = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
 
-  const baseRight = granular ? `${tier.name} (${tier.grade}) • ${bandRoman}` : `${tier.name} (${tier.grade})`;
-  const parts = [baseRight];
+  // STREAK: try GraphQL calendar first; fallback to REST events
+  let streakDays: number | undefined = undefined;
+  if (showStreak) {
+    try {
+      const weeks = await fetchContributionCalendar(username, token, streakDaysBack);
+      if (weeks) {
+        const days = fromContributionCalendar(weeks);
+        // Ensure we cover exactly requested window
+        const minYMD = toYMD(new Date(Date.now() - streakDaysBack * 86400000));
+        const maxYMD = toYMD(new Date());
+        const normalized = normalizeDays(days, minYMD, maxYMD);
+        streakDays = computeStreakDays(normalized);
+      } else {
+        // fallback via REST events
+        const events = await fetchEventsREST(username, token);
+        const days = fromEvents(events || [], streakDaysBack);
+        streakDays = computeStreakDays(days);
+      }
+    } catch {
+      streakDays = undefined;
+    }
+  }
+
+  // Build right-hand text with band/points/next/streak
+  const parts = [ granular ? `${tier.name} (${tier.grade}) • ${bandRoman}` : `${tier.name} (${tier.grade})` ];
   if (showPoints) parts.push(`${points.toFixed(1)} pts`);
   if (showNext && nextTier && pointsToNext !== undefined) parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
+  if (showStreak && typeof streakDays === 'number') parts.push(`🔥 ${streakDays}d streak`);
   const rightText = parts.join(' • ');
 
   if (badge) {
@@ -107,7 +137,9 @@ export async function GET(req: Request) {
     persona: tier.name,
     color: tier.color,
     method: used,
-    granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext }
+    streakDays: showStreak ? streakDays : undefined,
+    granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
+    tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   });
