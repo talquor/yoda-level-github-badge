@@ -1,13 +1,11 @@
 // lib/streak.ts
 /**
- * Compute a "level-up streak" in DAYS:
- * Number of consecutive days (going backward from the most recent day with data)
- * where the rolling-7-day sum STRICTLY increased vs the previous day.
- *
- * This rewards consistent, incremental progress and smooths out noisy daily counts.
+ * Streak utilities
+ * - classic: consecutive days (from the most recent day backwards) with ≥1 contribution.
+ * - momentum: consecutive days where the rolling-7-day sum strictly increases vs the previous day.
  */
 
-export type DayCount = { date: string; count: number }; // ISO date (YYYY-MM-DD), non-negative count
+export type DayCount = { date: string; count: number }; // YYYY-MM-DD, non-negative
 
 /** Normalize an input to Date and format as YYYY-MM-DD (UTC) */
 export function toYMD(d: string | number | Date): string {
@@ -29,7 +27,7 @@ export function normalizeDays(raw: DayCount[], minDate: string, maxDate: string)
   const end = new Date(maxDate + 'T00:00:00Z').getTime();
   const dayMs = 86400000;
   while (cur <= end) {
-    const ymd = toYMD(cur); // cur is a number (ms) — now supported
+    const ymd = toYMD(cur);
     out.push({ date: ymd, count: map.get(ymd) ?? 0 });
     cur += dayMs;
   }
@@ -48,13 +46,20 @@ function rollingSum(arr: number[], window = 7): number[] {
   return out;
 }
 
-/**
- * Compute streak days:
- * - Build rolling 7-day sums
- * - Start at the last day
- * - Count how many consecutive steps going backward keep strictly increasing vs previous day
- */
-export function computeStreakDays(days: DayCount[]): number {
+/** 🚀 Classic streak: consecutive days with ≥1 count, starting from most recent day. */
+export function computeClassicStreak(days: DayCount[]): number {
+  if (!days.length) return 0;
+  let i = days.length - 1;
+  let streak = 0;
+  while (i >= 0 && days[i].count >= 1) {
+    streak += 1;
+    i -= 1;
+  }
+  return streak;
+}
+
+/** ⚡ Momentum streak: consecutive days where 7-day sum strictly increases day-over-day. */
+export function computeMomentumStreak(days: DayCount[]): number {
   if (!days.length) return 0;
   const counts = days.map(d => Math.max(0, d.count || 0));
   const roll = rollingSum(counts, 7);
@@ -70,9 +75,7 @@ export function computeStreakDays(days: DayCount[]): number {
   return streak;
 }
 
-/**
- * Convert GitHub contribution calendar (GraphQL) → DayCount[]
- */
+/** Convert GitHub contribution calendar (GraphQL) → DayCount[] */
 export function fromContributionCalendar(
   weeks: Array<{ contributionDays: Array<{ date: string; contributionCount: number }> }>
 ): DayCount[] {
@@ -86,9 +89,7 @@ export function fromContributionCalendar(
   return out;
 }
 
-/**
- * Convert REST Events → DayCount[] (approx). Counts events per day for last N days.
- */
+/** Convert REST Events → DayCount[] (approx). Counts events per day for last N days. */
 export function fromEvents(events: Array<{ created_at: string }>, daysBack = 90): DayCount[] {
   const dayMs = 86400000;
   const today = new Date();
@@ -103,7 +104,7 @@ export function fromEvents(events: Array<{ created_at: string }>, daysBack = 90)
   const list: DayCount[] = [];
   let cur = startMs;
   while (cur <= today.getTime()) {
-    const ymd = toYMD(cur); // cur is a number — now supported
+    const ymd = toYMD(cur);
     list.push({ date: ymd, count: buckets.get(ymd) || 0 });
     cur += dayMs;
   }
