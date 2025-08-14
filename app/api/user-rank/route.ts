@@ -1,11 +1,26 @@
 // app/api/user-rank/route.ts
-import { fetchReposREST, fetchEventsREST, fetchUserREST, fetchUserMetricsGraphQL, fetchContributionCalendar } from '@/lib/github';
+import {
+  fetchReposREST,
+  fetchEventsREST,
+  fetchUserREST,
+  fetchUserMetricsGraphQL,
+  fetchContributionCalendar
+} from '@/lib/github';
 import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
 import { TIERS, tierWithBand } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
-import { computeStreakDays, fromContributionCalendar, fromEvents, normalizeDays, toYMD } from '@/lib/streak';
+import {
+  computeClassicStreak,
+  computeMomentumStreak,
+  fromContributionCalendar,
+  fromEvents,
+  normalizeDays,
+  toYMD
+} from '@/lib/streak';
 
 export const runtime = 'edge';
+
+type StreakMode = 'classic' | 'momentum';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -27,8 +42,9 @@ export async function GET(req: Request) {
   const showNext   = searchParams.get('showNext') === '1';
   const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
 
-  // NEW: add ?streak=1 to show level-up streak (days)
+  // Streak controls
   const showStreak = searchParams.get('streak') === '1';
+  const streakMode = (searchParams.get('streakMode') ?? 'classic') as StreakMode; // default classic
   const streakDaysBack = Math.max(30, Math.min(365, parseInt(searchParams.get('streakWindow') || '120', 10) || 120));
 
   const token = process.env.GITHUB_TOKEN;
@@ -81,30 +97,34 @@ export async function GET(req: Request) {
   const { tier, bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(points);
   const progressRatio = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
 
-  // STREAK: try GraphQL calendar first; fallback to REST events
+  // STREAK: GraphQL calendar preferred; REST events fallback
   let streakDays: number | undefined = undefined;
   if (showStreak) {
     try {
       const weeks = await fetchContributionCalendar(username, token, streakDaysBack);
       if (weeks) {
         const days = fromContributionCalendar(weeks);
-        // Ensure we cover exactly requested window
         const minYMD = toYMD(new Date(Date.now() - streakDaysBack * 86400000));
         const maxYMD = toYMD(new Date());
         const normalized = normalizeDays(days, minYMD, maxYMD);
-        streakDays = computeStreakDays(normalized);
+        streakDays =
+          streakMode === 'momentum'
+            ? computeMomentumStreak(normalized)
+            : computeClassicStreak(normalized);
       } else {
-        // fallback via REST events
         const events = await fetchEventsREST(username, token);
-        const days = fromEvents(events || [], streakDaysBack);
-        streakDays = computeStreakDays(days);
+        const approxDays = fromEvents(events || [], streakDaysBack);
+        streakDays =
+          streakMode === 'momentum'
+            ? computeMomentumStreak(approxDays)
+            : computeClassicStreak(approxDays);
       }
     } catch {
       streakDays = undefined;
     }
   }
 
-  // Build right-hand text with band/points/next/streak
+  // Right-side text
   const parts = [ granular ? `${tier.name} (${tier.grade}) • ${bandRoman}` : `${tier.name} (${tier.grade})` ];
   if (showPoints) parts.push(`${points.toFixed(1)} pts`);
   if (showNext && nextTier && pointsToNext !== undefined) parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
@@ -137,7 +157,7 @@ export async function GET(req: Request) {
     persona: tier.name,
     color: tier.color,
     method: used,
-    streakDays: showStreak ? streakDays : undefined,
+    streak: showStreak ? { mode: streakMode, days: streakDays } : undefined,
     granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
     tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
