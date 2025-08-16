@@ -1,3 +1,4 @@
+// app/api/badge/route.ts
 import { pickTierByPoints, tierWithBand } from '@/lib/rank';
 import { buildBadgeSVG } from '@/lib/badge';
 
@@ -45,26 +46,32 @@ export async function GET(req: Request) {
     progressRatio = (pctToNext ?? 0) / 100;
     const parts = [`${rightPersona} (${rightGrade}) • ${bandRoman}`];
     if (showPoints) parts.push(`${p.toFixed(1)} pts`);
-    if (showNext && nextTier && pointsToNext !== undefined) parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
+    if (showNext && nextTier && typeof pointsToNext === 'number') {
+      parts.push(`+${pointsToNext.toFixed(1)} to ${nextTier.name}`);
+    }
     rightText = parts.join(' • ');
   } else if (showPoints && points !== null) {
     rightText = `${rightText} • ${points.toFixed(1)} pts`;
   }
+
+  const isMaxed = rightGrade === 'S++' || (points !== null && points >= 98);
 
   const { svg } = buildBadgeSVG({
     label,
     rightText,
     rightColor,
     icon: logo,
-    progressRatio: xpParam === 'none' ? undefined : progressRatio,
+    progressRatio: xpParam === 'none' ? undefined : (isMaxed ? 1 : progressRatio),
     progressVariant: xpParam === 'bar' ? 'bar' : 'dots',
-    theme
+    theme,
+    decorateMaxed: isMaxed
   });
 
   return new Response(svg, {
     headers: {
-      "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": "public, max-age=0, s-maxage=3600, must-revalidate"
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=0, s-maxage=3600, must-revalidate',
+      'Access-Control-Allow-Origin': '*'
     }
   });
 }
