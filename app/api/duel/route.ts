@@ -74,10 +74,7 @@ export async function GET(req: Request) {
   const u1 = searchParams.get('u1');
   const u2 = searchParams.get('u2');
   const theme = (searchParams.get('theme') ?? 'jedi') as 'jedi' | 'sith';
-  const logo = (searchParams.get('logo') ?? 'galaxy') as
-    | 'github'
-    | 'saber'
-    | 'galaxy';
+  const logo = (searchParams.get('logo') ?? 'galaxy') as 'github' | 'saber' | 'galaxy';
   const xp = (searchParams.get('xp') ?? 'bar') as XPParam; // 'dots' | 'bar' | 'none'
   const label = searchParams.get('label') ?? 'Rank Duel';
 
@@ -87,11 +84,25 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
+        'Vary': 'Authorization, Accept-Encoding'
       },
     });
   }
 
-  const token = process.env.GITHUB_TOKEN;
+  // Token: Authorization header > env
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
+  let headerToken: string | undefined;
+  {
+    const parts = authHeader.split(/\s+/);
+    if (parts.length >= 2) {
+      const scheme = parts[0].toLowerCase();
+      if (scheme === 'bearer' || scheme === 'token') {
+        headerToken = parts[1]?.trim();
+      }
+    }
+  }
+  const token = headerToken || process.env.GITHUB_TOKEN;
+
   const [A, B] = await Promise.all([scoreUser(u1, token), scoreUser(u2, token)]);
 
   // Winner (or tie)
@@ -99,13 +110,8 @@ export async function GET(req: Request) {
 
   // Build two badges (SVG fragments)
   const make = (x: typeof A) => {
-    const rightText = `${x.band.tier.name} (${x.band.tier.grade}) • ${x.band.bandRoman} • ${x.points.toFixed(
-      1
-    )} pts`;
-
-    // Map xp='none' to undefined so it matches buildBadgeSVG types
-    const progressRatio =
-      xp === 'none' ? undefined : (x.band.pctToNext ?? 0) / 100;
+    const rightText = `${x.band.tier.name} (${x.band.tier.grade}) • ${x.band.bandRoman} • ${x.points.toFixed(1)} pts`;
+    const progressRatio = xp === 'none' ? undefined : (x.band.pctToNext ?? 0) / 100;
     const progressVariant = xp === 'none' ? undefined : (xp as 'dots' | 'bar');
 
     const { svg, width, height } = buildBadgeSVG({
@@ -116,6 +122,7 @@ export async function GET(req: Request) {
       progressRatio,
       progressVariant,
       theme,
+      decorateMaxed: x.band.tier.grade === 'S++' || x.points >= 98
     });
     return { svg, width, height };
   };
@@ -129,9 +136,7 @@ export async function GET(req: Request) {
 
   const title = winner ? `Winner: ${winner.username}` : 'It’s a tie!';
   const doc = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img" aria-label="${esc(
-    label
-  )}: ${esc(title)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img" aria-label="${esc(label)}: ${esc(title)}">
   <title>${esc(label)}: ${esc(title)}</title>
   <defs>
     <linearGradient id="sep" x2="0" y2="100%">
@@ -154,7 +159,8 @@ export async function GET(req: Request) {
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=600, must-revalidate',
       'Access-Control-Allow-Origin': '*',
-    },
+      'Vary': 'Authorization, Accept-Encoding'
+    }
   });
 }
 

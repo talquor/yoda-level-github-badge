@@ -1,7 +1,7 @@
 // lib/streak.ts
 /**
  * Streak utilities
- * - classic: consecutive days (from the most recent day backwards) with ≥1 contribution.
+ * - classic: consecutive days (from anchor backward) with ≥1 contribution.
  * - momentum: consecutive days where the rolling-7-day sum strictly increases vs the previous day.
  */
 
@@ -46,10 +46,22 @@ function rollingSum(arr: number[], window = 7): number[] {
   return out;
 }
 
-/** 🚀 Classic streak: consecutive days with ≥1 count, starting from most recent day. */
-export function computeClassicStreak(days: DayCount[]): number {
+/** 🚀 Classic streak with anchor ('today' or 'lastActive') */
+export function computeClassicStreak(
+  days: DayCount[],
+  anchor: 'today' | 'lastActive' = 'lastActive'
+): number {
   if (!days.length) return 0;
   let i = days.length - 1;
+
+  if (anchor === 'today') {
+    if (days[i].count < 1) return 0;
+  } else {
+    // lastActive → walk back to the latest day with activity
+    while (i >= 0 && days[i].count < 1) i--;
+    if (i < 0) return 0;
+  }
+
   let streak = 0;
   while (i >= 0 && days[i].count >= 1) {
     streak += 1;

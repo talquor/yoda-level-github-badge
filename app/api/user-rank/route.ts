@@ -43,11 +43,24 @@ export async function GET(req: Request) {
   const xpParam    = (searchParams.get('xp') ?? 'dots') as 'dots' | 'bar' | 'none';
 
   // Streak controls
-  const showStreak = searchParams.get('streak') === '1';
-  const streakMode = (searchParams.get('streakMode') ?? 'classic') as StreakMode; // default classic
+  const showStreak   = searchParams.get('streak') === '1';
+  const streakMode   = (searchParams.get('streakMode') ?? 'classic') as StreakMode;
+  const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
   const streakDaysBack = Math.max(30, Math.min(365, parseInt(searchParams.get('streakWindow') || '120', 10) || 120));
 
-  const token = process.env.GITHUB_TOKEN;
+  // 🔐 Token priority: Authorization header > env (support "Bearer" or legacy "token")
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
+  let headerToken: string | undefined;
+  {
+    const parts = authHeader.split(/\s+/);
+    if (parts.length >= 2) {
+      const scheme = parts[0].toLowerCase();
+      if (scheme === 'bearer' || scheme === 'token') {
+        headerToken = parts[1]?.trim();
+      }
+    }
+  }
+  const token = headerToken || process.env.GITHUB_TOKEN;
 
   let points = 0;
   let used = 'rest';
@@ -88,7 +101,11 @@ export async function GET(req: Request) {
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message || 'GitHub fetch failed' }), {
       status: 502,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Vary': 'Authorization, Accept-Encoding'
+      }
     });
   }
 
@@ -110,14 +127,14 @@ export async function GET(req: Request) {
         streakDays =
           streakMode === 'momentum'
             ? computeMomentumStreak(normalized)
-            : computeClassicStreak(normalized);
+            : computeClassicStreak(normalized, streakAnchor);
       } else {
         const events = await fetchEventsREST(username, token);
         const approxDays = fromEvents(events || [], streakDaysBack);
         streakDays =
           streakMode === 'momentum'
             ? computeMomentumStreak(approxDays)
-            : computeClassicStreak(approxDays);
+            : computeClassicStreak(approxDays, streakAnchor);
       }
     } catch {
       streakDays = undefined;
@@ -131,21 +148,26 @@ export async function GET(req: Request) {
   if (showStreak && typeof streakDays === 'number') parts.push(`🔥 ${streakDays}d streak`);
   const rightText = parts.join(' • ');
 
+  // 🎖️ Maxed-out decoration for Yoda / S++
+  const isMaxed = tier.grade === 'S++' || points >= 98;
+
   if (badge) {
     const { svg } = buildBadgeSVG({
       label,
       rightText,
       rightColor: tier.color,
       icon: logo,
-      progressRatio: xpParam === 'none' ? undefined : progressRatio,
+      progressRatio: xpParam === 'none' ? undefined : (isMaxed ? 1 : progressRatio),
       progressVariant: xpParam === 'bar' ? 'bar' : 'dots',
-      theme
+      theme,
+      decorateMaxed: isMaxed
     });
     return new Response(svg, {
       headers: {
         'Content-Type': 'image/svg+xml; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=1200, must-revalidate',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': '*',
+        'Vary': 'Authorization, Accept-Encoding'
       }
     });
   }
@@ -161,6 +183,11 @@ export async function GET(req: Request) {
     granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
     tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=0, s-maxage=300, must-revalidate',
+      'Vary': 'Authorization, Accept-Encoding'
+    }
   });
 }

@@ -1,7 +1,8 @@
+// lib/badge.ts
 import { textWidth } from './rank';
 import { themeColors, type Theme } from './theme';
 
-/** GitHub mark (kept as an option) */
+/** GitHub mark */
 const GH_LOGO_PATH =
   'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38' +
   ' 0-.19-.01-.82-.01-1.49C3.73 14.91 3.27 13.73 3.27 13.73c-.36-.91-.88-1.15-.88-1.15' +
@@ -63,6 +64,7 @@ export function buildBadgeSVG(opts: {
   progressRatio?: number;         // 0..1 progress within current tier
   progressVariant?: 'dots' | 'bar';
   theme?: Theme;                  // 'jedi' | 'sith'
+  decorateMaxed?: boolean;        // extra glow/sparkles when maxed
 }) {
   const {
     label = 'Rank',
@@ -71,7 +73,8 @@ export function buildBadgeSVG(opts: {
     icon = 'saber',
     progressRatio,
     progressVariant = 'dots',
-    theme = 'jedi'
+    theme = 'jedi',
+    decorateMaxed = false
   } = opts;
 
   const tc = themeColors(theme);
@@ -97,7 +100,8 @@ export function buildBadgeSVG(opts: {
   else if (icon === 'galaxy') iconMarkup = GALAXY_SVG;
 
   // XP visuals
-  const pr = Math.max(0, Math.min(1, progressRatio ?? 0));
+  const prInput = progressRatio ?? 0;
+  const pr = Math.max(0, Math.min(1, prInput));
   const xpColor = xpColorFor(pr, theme);
   let xpMarkup = '';
   if (progressRatio !== undefined) {
@@ -128,6 +132,28 @@ export function buildBadgeSVG(opts: {
     }
   }
 
+  // ✨ Decorations for maxed (Yoda / S++)
+  let decoMarkup = '';
+  if (decorateMaxed) {
+    // subtle crown of stars over the right panel + outer glow stroke
+    const crownY = 6;
+    const cxStart = leftW + padX + 8;
+    const step = 12;
+    const count = Math.max(3, Math.floor((rightW - padX * 2) / step) - 1);
+    const stars = Array.from({ length: count }, (_, i) => {
+      const cx = cxStart + i * step;
+      return `<polygon points="${cx},${crownY} ${cx+1.6},${crownY+4} ${cx+4.8},${crownY+4} ${cx+2.2},${crownY+6.4} ${cx+3.2},${crownY+10} ${cx},${crownY+7.8} ${cx-3.2},${crownY+10} ${cx-2.2},${crownY+6.4} ${cx-4.8},${crownY+4} ${cx-1.6},${crownY+4}" fill="#fff" opacity="0.45"/>`;
+    }).join('\n');
+
+    decoMarkup = `
+      <g opacity="0.9">
+        <rect x="${leftW}" y="0" width="${rightW}" height="${height}" fill="url(#glow)"/>
+        ${stars}
+      </g>
+      <rect x="${leftW}" y="0" width="${rightW}" height="${height}" fill="none" stroke="#fff" stroke-opacity="0.16" rx="${radius}"/>
+    `;
+  }
+
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="${escAttr(leftText)}: ${escAttr(rightTextUpper)}">
   <title>${escText(leftText)}: ${escText(rightTextUpper)}</title>
@@ -143,10 +169,10 @@ export function buildBadgeSVG(opts: {
       <stop offset="1"   stop-color="${escAttr(rightColor)}" stop-opacity="0"/>
     </radialGradient>
     <pattern id="stars" width="12" height="12" patternUnits="userSpaceOnUse">
-      <circle cx="2"  cy="3"   r="0.6" fill="${tc.starA}" opacity="0.45"/>
-      <circle cx="7"  cy="1.5" r="0.5" fill="${tc.starB}" opacity="0.35"/>
-      <circle cx="10" cy="7"   r="0.7" fill="${tc.starC}" opacity="0.40"/>
-      <circle cx="4"  cy="9.5" r="0.4" fill="${tc.starD}" opacity="0.35"/>
+      <circle cx="2"  cy="3"   r="0.6" fill="#9fb6ff" opacity="0.45"/>
+      <circle cx="7"  cy="1.5" r="0.5" fill="#bcd1ff" opacity="0.35"/>
+      <circle cx="10" cy="7"   r="0.7" fill="#e5e7eb" opacity="0.40"/>
+      <circle cx="4"  cy="9.5" r="0.4" fill="#d1d5db" opacity="0.35"/>
     </pattern>
     <mask id="round">
       <rect width="${totalW}" height="${height}" rx="${radius}" fill="#fff"/>
@@ -162,6 +188,7 @@ export function buildBadgeSVG(opts: {
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="url(#glow)"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
     ${xpMarkup}
+    ${decoMarkup}
   </g>
 
   <g aria-hidden="true" fill="#fff" text-rendering="geometricPrecision"
