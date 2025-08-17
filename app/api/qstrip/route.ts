@@ -9,14 +9,9 @@ export const runtime = 'edge';
 type WindowSize = 8 | 16 | 32;
 type Size = 'sm' | 'md' | 'lg';
 
-function esc(s: string) {
-  return (s || '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
-}
 const clamp01 = (x:number)=>Math.max(0,Math.min(1,x));
+const esc = (s:string)=> (s||'')
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 function colorFor(v01: number, theme: Theme) {
   // readable ramp on GitHub (dark & light)
@@ -45,10 +40,28 @@ function parseFocus(param: string | null, windowSize: number) {
 
 function layoutBySize(size: Size) {
   switch (size) {
-    case 'lg': return { cell: 18, gap: 3, pad: 12, cellH: 34, emojiFS: 13, captionFS: 13, legendFS: 12 };
-    case 'md': return { cell: 14, gap: 2, pad: 10, cellH: 28, emojiFS: 11, captionFS: 12, legendFS: 11 };
-    default:   return { cell: 12, gap: 2, pad: 8,  cellH: 24, emojiFS: 10, captionFS: 11, legendFS: 10 };
+    case 'lg': return { cell: 18, gap: 3, pad: 12, cellH: 34, emojiFS: 13, captionFS: 13, legendFS: 12, captionPad: 8 };
+    case 'md': return { cell: 14, gap: 2, pad: 10, cellH: 28, emojiFS: 11, captionFS: 12, legendFS: 11, captionPad: 7 };
+    default:   return { cell: 12, gap: 2, pad: 8,  cellH: 24, emojiFS: 10, captionFS: 11, legendFS: 10, captionPad: 6 };
   }
+}
+
+/** Basic word-wrapping into <tspan> rows, constrained by available text width. */
+function wrapLines(text: string, maxChars: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur: string[] = [];
+  for (const w of words) {
+    const test = (cur.concat(w)).join(' ');
+    if (test.length <= maxChars) {
+      cur.push(w);
+    } else {
+      if (cur.length) lines.push(cur.join(' '));
+      cur = [w];
+    }
+  }
+  if (cur.length) lines.push(cur.join(' '));
+  return lines;
 }
 
 export async function GET(req: Request) {
@@ -62,12 +75,14 @@ export async function GET(req: Request) {
   }
 
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
-  const showCaption = searchParams.get('caption') === '1';    // show explainer under strip
-  const showLegend  = searchParams.get('legend') === '1';     // show emoji→concept legend row
-  const size = (searchParams.get('size') ?? 'md') as Size;    // sm|md|lg
+  const showCaption = searchParams.get('caption') === '1';       // caption box with wrapped text
+  const showLegend  = searchParams.get('legend') === '1';        // emoji→concept legend row
+  const size = (searchParams.get('size') ?? 'md') as Size;       // sm|md|lg
   const wRaw = parseInt(searchParams.get('window') || '16', 10);
   const windowSize: WindowSize = (wRaw === 8 || wRaw === 16 || wRaw === 32) ? (wRaw as WindowSize) : 16;
   const focusParam = parseFocus(searchParams.get('focus'), windowSize);
+  const clickCells = searchParams.get('click') === '1';          // make each day clickable (opens focused SVG)
+  const showNav    = searchParams.get('nav') === '1';            // show ◀ ▶ arrows (work when viewing SVG directly)
 
   // Token: Authorization header > env (support Bearer|token)
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
@@ -81,7 +96,7 @@ export async function GET(req: Request) {
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  // Pull contributions (prefer GraphQL calendar done in github helper)
+  // Pull contributions
   let counts: number[] = [];
   try {
     const daysBack = Math.max(60, windowSize);
@@ -107,12 +122,12 @@ export async function GET(req: Request) {
 
   // Layout
   const tc = themeColors(theme);
-  const { cell, gap, pad, cellH, emojiFS, captionFS, legendFS } = layoutBySize(size);
+  const { cell, gap, pad, cellH, emojiFS, captionFS, legendFS, captionPad } = layoutBySize(size);
+  const captionBoxH = showCaption ? (captionFS * 2 + captionPad * 2) : 0; // room for 2 wrapped lines
   const legendH = showLegend ? (legendFS + 10) : 0;
-  const captionH = showCaption ? (captionFS + 10) : 0;
 
   const width  = pad * 2 + windowSize * cell + (windowSize - 1) * gap;
-  const height = pad * 2 + cellH + legendH + captionH;
+  const height = pad * 2 + cellH + captionBoxH + legendH;
 
   // Focus index (today = last cell)
   const focusIndex = ((): number => {
@@ -121,7 +136,23 @@ export async function GET(req: Request) {
     return windowSize - 1;
   })();
 
-  // Build day cells
+  // Build base URL (for click + nav)
+  const base = (params: Record<string,string|number|undefined>) => {
+    const u = new URL(req.url);
+    // keep key params stable
+    const keys = ['username','theme','size','window','caption','legend','click','nav'];
+    for (const k of keys) {
+      const v = searchParams.get(k);
+      if (v !== null) u.searchParams.set(k, v);
+    }
+    for (const [k,v] of Object.entries(params)) {
+      if (v === undefined) continue;
+      u.searchParams.set(k, String(v));
+    }
+    return u.pathname + '?' + u.searchParams.toString();
+  };
+
+  // Build day cells (optionally clickable)
   const cells: string[] = [];
   for (let i = 0; i < windowSize; i++) {
     const x = pad + i * (cell + gap);
@@ -136,45 +167,86 @@ export async function GET(req: Request) {
     const stroke = isFocus ? ` stroke="#ffffff" stroke-opacity="0.85" stroke-width="1.2"` : '';
     const opacity = isFocus ? 1 : 0.92;
 
-    cells.push(`
-      <g>
-        <title>${esc(label)}</title>
-        <rect x="${x}" y="${y}" width="${cell}" height="${cellH}" rx="3" fill="${fill}" opacity="${opacity}"${stroke}/>
-        <text x="${x + cell/2}" y="${y + cellH - 6}" text-anchor="middle"
-              font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS}" fill="#ffffff" opacity="0.95">
-          ${esc(concept.emoji)}
-        </text>
-      </g>
-    `);
+    const rect = `
+      <rect x="${x}" y="${y}" width="${cell}" height="${cellH}" rx="3" fill="${fill}" opacity="${opacity}"${stroke}/>
+      <text x="${x + cell/2}" y="${y + cellH - 6}" text-anchor="middle"
+            font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS}" fill="#ffffff" opacity="0.95">
+        ${esc(concept.emoji)}
+      </text>
+    `;
+
+    if (clickCells) {
+      const href = base({ focus: i });
+      cells.push(`<g><title>${esc(label)}</title><a xlink:href="${esc(href)}">${rect}</a></g>`);
+    } else {
+      cells.push(`<g><title>${esc(label)}</title>${rect}</g>`);
+    }
+  }
+
+  // Caption box (wrapped text, no clipping)
+  let caption = '';
+  if (showCaption) {
+    const fConcept = conceptForIndex(focusIndex);
+    const text = `${fConcept.emoji} ${fConcept.title}: ${fConcept.hint}`;
+    const boxX = pad;
+    const boxY = pad + cellH + 6;
+    const boxW = width - pad * 2;
+    const lineChars = Math.max(20, Math.floor(boxW / (size === 'lg' ? 8.5 : size === 'md' ? 9.2 : 10.0))); // crude width → chars
+    const lines = wrapLines(text, lineChars).slice(0, 2); // 2 lines max for compactness
+    const tX = boxX + captionPad;
+    const tY = boxY + captionPad + captionFS; // first baseline
+    const bg = `
+      <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${captionBoxH - 6}"
+            fill="rgba(0,0,0,0.28)" rx="4" />
+    `;
+    const tspans = lines.map((ln, k) =>
+      `<tspan x="${tX}" dy="${k === 0 ? 0 : captionFS + 2}">${esc(ln)}</tspan>`).join('');
+    caption = `
+      ${bg}
+      <text x="${tX}" y="${tY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+            font-size="${captionFS}" fill="#e5e7eb" opacity="0.98">${tspans}</text>
+    `;
   }
 
   // Legend row (emoji + title list)
   let legend = '';
   if (showLegend) {
     const lx = pad;
-    const ly = pad + cellH + (captionH > 0 ? captionH : 0) + (showCaption ? 6 : 0);
+    const ly = pad + cellH + captionBoxH + legendFS + 2;
     const items = Q_CONCEPTS.slice(0, Math.min(Q_CONCEPTS.length, 8))
       .map(c => `${c.emoji} ${c.title}`).join('   •   ');
     legend = `
       <text x="${lx}" y="${ly}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-            font-size="${legendFS}" fill="#e5e7eb" opacity="0.95">
-        ${esc(items)}
-      </text>`;
+            font-size="${legendFS}" fill="#e5e7eb" opacity="0.95">${esc(items)}</text>
+    `;
   }
 
-  // Caption under strip (focused concept)
-  let caption = '';
-  if (showCaption) {
-    const fConcept = conceptForIndex(focusIndex);
-    const text = `${fConcept.emoji} ${fConcept.title}: ${fConcept.hint}`;
-    caption = `
-      <text x="${pad}" y="${pad + cellH + captionFS}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-            font-size="${captionFS}" fill="#e5e7eb">${esc(text)}</text>`;
+  // Navigation arrows (when viewing SVG directly)
+  let nav = '';
+  if (showNav) {
+    const yMid = pad + cellH/2 + 1;
+    const prev = Math.max(0, focusIndex - 1);
+    const next = Math.min(windowSize - 1, focusIndex + 1);
+    const hrefPrev = base({ focus: prev });
+    const hrefNext = base({ focus: next });
+    nav = `
+      <a xlink:href="${esc(hrefPrev)}">
+        <text x="${pad - 6}" y="${yMid}" text-anchor="middle"
+              font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS+2}"
+              fill="#e5e7eb" opacity="0.85">◀</text>
+      </a>
+      <a xlink:href="${esc(hrefNext)}">
+        <text x="${width - pad + 6}" y="${yMid}" text-anchor="middle"
+              font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS+2}"
+              fill="#e5e7eb" opacity="0.85">▶</text>
+      </a>
+    `;
   }
 
   const shineHeight = pad * 2 + cellH;
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" role="img" aria-label="Quantum Strip for ${esc(username)}">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="${width}" height="${height}" role="img" aria-label="Quantum Strip for ${esc(username)}">
   <title>Quantum Strip — ${esc(username)}</title>
   <defs>
     <linearGradient id="shine" x2="0" y2="1">
@@ -187,6 +259,7 @@ export async function GET(req: Request) {
   ${cells.join('\n')}
   ${caption}
   ${legend}
+  ${nav}
 </svg>`.trim();
 
   return new Response(svg, {

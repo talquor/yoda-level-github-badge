@@ -252,3 +252,6 @@ Built with Next.js App Router + Edge Functions. Star Wars-inspired styling for f
 
 
 ![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&theme=jedi&edu=1)
+[![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&size=lg&theme=jedi&caption=1&legend=1&click=1&nav=1)](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=32&size=lg&theme=jedi&caption=1&legend=1&click=1&nav=1)
+
+![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&size=lg&caption=1&focus=entanglement)
