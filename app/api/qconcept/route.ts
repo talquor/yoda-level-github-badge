@@ -3,20 +3,14 @@ import { themeColors, type Theme } from '@/lib/theme';
 import { Q_CONCEPTS, conceptForIndex, indexForKey } from '@/lib/quantum_concepts';
 
 export const runtime = 'edge';
-
 type Size = 'sm' | 'md' | 'lg';
 
 const esc = (s:string)=> (s||'')
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-const clamp01 = (x:number)=>Math.max(0,Math.min(1,x));
-
 function hashStr(s: string): number {
   let h = 2166136261 >>> 0;
-  for (let i=0;i<s.length;i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
+  for (let i=0;i<s.length;i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
 
@@ -27,20 +21,13 @@ function layoutBySize(size: Size) {
     default:   return { pad: 10, titleFS: 13, formulaFS: 11, hintFS: 11, lineW: 32, cardW: 480 };
   }
 }
-
-/** split into tspans by max chars so text always visible in README */
 function wrap(text: string, maxChars: number, maxLines: number): string[] {
   const words = (text || '').split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let cur: string[] = [];
+  const lines: string[] = []; let cur: string[] = [];
   for (const w of words) {
     const next = [...cur, w].join(' ');
     if (next.length <= maxChars) cur.push(w);
-    else {
-      if (cur.length) lines.push(cur.join(' '));
-      cur = [w];
-      if (lines.length >= maxLines - 1) break;
-    }
+    else { if (cur.length) lines.push(cur.join(' ')); cur = [w]; if (lines.length >= maxLines - 1) break; }
   }
   if (cur.length && lines.length < maxLines) lines.push(cur.join(' '));
   return lines;
@@ -48,34 +35,27 @@ function wrap(text: string, maxChars: number, maxLines: number): string[] {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
-  const size  = (searchParams.get('size') ?? 'lg') as Size; // looks best in README
+  const size  = (searchParams.get('size') ?? 'lg') as Size;
   const rotateMin = Math.max(1, Math.min(120, parseInt(searchParams.get('rotate') || '10', 10) || 10));
-  const seed = searchParams.get('seed') || ''; // shift cycle per user if desired
+  const seed = searchParams.get('seed') || '';
 
-  // Concept selection:
-  // - concept=<key> or index=<n> pins a concept
-  // - otherwise auto-rotate by time (UTC minutes / rotate)
   let idx: number | undefined;
   const cKey = searchParams.get('concept');
   const cIdx = searchParams.get('index');
   if (cKey) idx = indexForKey(cKey);
   else if (cIdx && !isNaN(+cIdx)) idx = (+cIdx) % Q_CONCEPTS.length;
   else {
-    const nowMin = Math.floor(Date.now() / 60000); // UTC minutes
+    const nowMin = Math.floor(Date.now() / 60000);
     const base = Math.floor(nowMin / rotateMin);
     const shift = seed ? (hashStr(seed) % Q_CONCEPTS.length) : 0;
     idx = (base + shift) % Q_CONCEPTS.length;
   }
   if (idx! < 0) idx = 0;
 
-  const concept = conceptForIndex(idx!);
-
-  // Layout
   const tc = themeColors(theme);
+  const concept = conceptForIndex(idx!);
   const { pad, titleFS, formulaFS, hintFS, lineW, cardW } = layoutBySize(size);
-  const cardH = 140; // adaptive-ish; we keep it compact but readable
 
   const emojiX = pad + 8;
   const emojiY = pad + 24;
@@ -98,44 +78,34 @@ export async function GET(req: Request) {
   <title>${esc(concept.title)} — simple formula & intuition</title>
   <defs>
     <linearGradient id="shine" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.06"/>
-      <stop offset="1" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="panel" x2="0" y2="1">
-      <stop offset="0" stop-color="rgba(255,255,255,0.06)"/>
-      <stop offset="1" stop-color="rgba(0,0,0,0.22)"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
     </linearGradient>
   </defs>
 
-  <!-- Card background -->
   <rect x="0" y="0" width="${cardW}" height="${bgH}" rx="8" fill="${esc(tc.leftColor)}"/>
   <rect x="0" y="0" width="${cardW}" height="${bgH}" fill="url(#shine)"/>
 
-  <!-- Title -->
   <text x="${titleX}" y="${emojiY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
         font-size="${titleFS}" font-weight="700" fill="#e5e7eb">${esc(titleText)}</text>
 
-  <!-- Formula panel -->
   <rect x="${titleX - 6}" y="${emojiY + 10}" width="${cardW - titleX - pad}" height="${formulaLines.length * (formulaFS + 4) + 10}"
-        rx="6" fill="rgba(0,0,0,0.28)"/>
+        rx="6" fill="#000000" opacity="0.28"/>
   <text x="${titleX}" y="${emojiY + 26}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
         font-size="${formulaFS}" fill="#c7d2fe" opacity="0.98">${tspans(formulaLines, formulaFS)}</text>
 
-  <!-- Hint panel -->
   <rect x="${titleX - 6}" y="${emojiY + 20 + (formulaLines.length * (formulaFS + 4))}" width="${cardW - titleX - pad}"
-        height="${hintLines.length * (hintFS + 4) + 12}" rx="6" fill="rgba(0,0,0,0.24)"/>
+        height="${hintLines.length * (hintFS + 4) + 12}" rx="6" fill="#000000" opacity="0.24"/>
   <text x="${titleX}" y="${emojiY + 36 + (formulaLines.length * (formulaFS + 4))}"
         font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
         font-size="${hintFS}" fill="#e5e7eb" opacity="0.98">${tspans(hintLines, hintFS)}</text>
 
-  <!-- Big emoji badge -->
-  <circle cx="${emojiX - 2}" cy="${emojiY - 6}" r="18" fill="rgba(255,255,255,0.08)" stroke="#e5e7eb" stroke-opacity="0.22"/>
+  <circle cx="${emojiX - 2}" cy="${emojiY - 6}" r="18" fill="#ffffff" opacity="0.08" stroke="#e5e7eb" stroke-opacity="0.22"/>
   <text x="${emojiX - 2}" y="${emojiY - 2}" text-anchor="middle"
         font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${titleFS + 6}" fill="#ffffff" opacity="0.95">
     ${esc(concept.emoji)}
   </text>
 
-  <!-- Footer index -->
   <text x="${cardW - pad}" y="${bgH - 8}" text-anchor="end"
         font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${hintFS - 1}" fill="#9ca3af">
     ${idx! + 1}/${Q_CONCEPTS.length}
@@ -145,7 +115,6 @@ export async function GET(req: Request) {
   return new Response(svg, {
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',
-      // Keep camo reasonably fresh but not too chatty
       'Cache-Control': 'public, max-age=0, s-maxage=120, must-revalidate',
       'Access-Control-Allow-Origin': '*',
       'Vary': 'Accept-Encoding'

@@ -34,7 +34,6 @@ const GALAXY_SVG = `
   </g>
 `;
 
-// Escape helpers
 function escText(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -42,7 +41,6 @@ function escAttr(s: string) {
   return escText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// XP color ramp
 function xpColorFor(pr: number, theme: Theme): string {
   if (theme === 'sith') {
     if (pr < 0.25) return '#ef4444';
@@ -57,14 +55,14 @@ function xpColorFor(pr: number, theme: Theme): string {
 }
 
 export function buildBadgeSVG(opts: {
-  label?: string;                 // default "Rank"
-  rightText: string;              // e.g., "JEDI KNIGHT (A) • II • 82.5 PTS"
-  rightColor: string;             // hex like #22c55e
+  label?: string;
+  rightText: string;
+  rightColor: string;
   icon?: 'github' | 'saber' | 'galaxy';
-  progressRatio?: number;         // 0..1 progress within current tier
+  progressRatio?: number;
   progressVariant?: 'dots' | 'bar';
-  theme?: Theme;                  // 'jedi' | 'sith'
-  decorateMaxed?: boolean;        // extra glow/sparkles when maxed
+  theme?: 'jedi' | 'sith';
+  decorateMaxed?: boolean;
 }) {
   const {
     label = 'Rank',
@@ -81,7 +79,6 @@ export function buildBadgeSVG(opts: {
   const leftText = (label || 'Rank').toUpperCase();
   const rightTextUpper = (rightText || 'MASTER YODA (S++)').toUpperCase();
 
-  // dimensions
   const padX = 14;
   const height = 28;
   const radius = 4;
@@ -99,7 +96,6 @@ export function buildBadgeSVG(opts: {
   else if (icon === 'saber') iconMarkup = SABER_SVG;
   else if (icon === 'galaxy') iconMarkup = GALAXY_SVG;
 
-  // XP visuals
   const prInput = progressRatio ?? 0;
   const pr = Math.max(0, Math.min(1, prInput));
   const xpColor = xpColorFor(pr, theme);
@@ -109,7 +105,7 @@ export function buildBadgeSVG(opts: {
       const barH = 3, barY = height - barH;
       const filledW = Math.round(rightW * pr);
       xpMarkup = `
-        <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="rgba(0,0,0,0.22)"/>
+        <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
         <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${escAttr(xpColor)}" opacity="0.95"/>
       `;
     } else {
@@ -132,10 +128,8 @@ export function buildBadgeSVG(opts: {
     }
   }
 
-  // ✨ Decorations for maxed (Yoda / S++)
   let decoMarkup = '';
   if (decorateMaxed) {
-    // subtle crown of stars over the right panel + outer glow stroke
     const crownY = 6;
     const cxStart = leftW + padX + 8;
     const step = 12;
@@ -180,10 +174,8 @@ export function buildBadgeSVG(opts: {
   </defs>
 
   <g mask="url(#round)">
-    <!-- left -->
     <rect width="${leftW}" height="${height}" fill="${escAttr(tc.leftColor)}"/>
     <rect width="${leftW}" height="${height}" fill="url(#stars)" opacity="0.35"/>
-    <!-- right -->
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="${escAttr(rightColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="url(#glow)"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>

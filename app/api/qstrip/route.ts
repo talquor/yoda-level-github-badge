@@ -14,7 +14,6 @@ const esc = (s:string)=> (s||'')
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 function colorFor(v01: number, theme: Theme) {
-  // readable ramp on GitHub (dark & light)
   if (theme === 'sith') {
     if (v01 < 0.25) return '#7f1d1d';
     if (v01 < 0.50) return '#b91c1c';
@@ -46,19 +45,14 @@ function layoutBySize(size: Size) {
   }
 }
 
-/** Basic word-wrapping into <tspan> rows, constrained by available text width. */
 function wrapLines(text: string, maxChars: number): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let cur: string[] = [];
   for (const w of words) {
     const test = (cur.concat(w)).join(' ');
-    if (test.length <= maxChars) {
-      cur.push(w);
-    } else {
-      if (cur.length) lines.push(cur.join(' '));
-      cur = [w];
-    }
+    if (test.length <= maxChars) cur.push(w);
+    else { if (cur.length) lines.push(cur.join(' ')); cur = [w]; }
   }
   if (cur.length) lines.push(cur.join(' '));
   return lines;
@@ -75,16 +69,15 @@ export async function GET(req: Request) {
   }
 
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
-  const showCaption = searchParams.get('caption') === '1';       // caption box with wrapped text
-  const showLegend  = searchParams.get('legend') === '1';        // emoji→concept legend row
-  const size = (searchParams.get('size') ?? 'md') as Size;       // sm|md|lg
+  const showCaption = searchParams.get('caption') === '1';
+  const showLegend  = searchParams.get('legend') === '1';
+  const size = (searchParams.get('size') ?? 'md') as Size;
   const wRaw = parseInt(searchParams.get('window') || '16', 10);
   const windowSize: WindowSize = (wRaw === 8 || wRaw === 16 || wRaw === 32) ? (wRaw as WindowSize) : 16;
   const focusParam = parseFocus(searchParams.get('focus'), windowSize);
-  const clickCells = searchParams.get('click') === '1';          // make each day clickable (opens focused SVG)
-  const showNav    = searchParams.get('nav') === '1';            // show ◀ ▶ arrows (work when viewing SVG directly)
+  const clickCells = searchParams.get('click') === '1';
+  const showNav    = searchParams.get('nav') === '1';
 
-  // Token: Authorization header > env (support Bearer|token)
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   let headerToken: string | undefined;
   {
@@ -96,7 +89,6 @@ export async function GET(req: Request) {
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  // Pull contributions
   let counts: number[] = [];
   try {
     const daysBack = Math.max(60, windowSize);
@@ -116,30 +108,25 @@ export async function GET(req: Request) {
     counts = new Array(windowSize).fill(0);
   }
 
-  // Normalize to 0..1 for intensity
   const maxC = Math.max(1, ...counts);
   const vals = counts.map(c => clamp01(c / maxC));
 
-  // Layout
   const tc = themeColors(theme);
   const { cell, gap, pad, cellH, emojiFS, captionFS, legendFS, captionPad } = layoutBySize(size);
-  const captionBoxH = showCaption ? (captionFS * 2 + captionPad * 2) : 0; // room for 2 wrapped lines
+  const captionBoxH = showCaption ? (captionFS * 2 + captionPad * 2) : 0;
   const legendH = showLegend ? (legendFS + 10) : 0;
 
   const width  = pad * 2 + windowSize * cell + (windowSize - 1) * gap;
   const height = pad * 2 + cellH + captionBoxH + legendH;
 
-  // Focus index (today = last cell)
   const focusIndex = ((): number => {
     if (focusParam === 'today') return windowSize - 1;
     if (typeof focusParam === 'number') return focusParam;
     return windowSize - 1;
   })();
 
-  // Build base URL (for click + nav)
   const base = (params: Record<string,string|number|undefined>) => {
     const u = new URL(req.url);
-    // keep key params stable
     const keys = ['username','theme','size','window','caption','legend','click','nav'];
     for (const k of keys) {
       const v = searchParams.get(k);
@@ -152,7 +139,6 @@ export async function GET(req: Request) {
     return u.pathname + '?' + u.searchParams.toString();
   };
 
-  // Build day cells (optionally clickable)
   const cells: string[] = [];
   for (let i = 0; i < windowSize; i++) {
     const x = pad + i * (cell + gap);
@@ -183,7 +169,6 @@ export async function GET(req: Request) {
     }
   }
 
-  // Caption box (wrapped text, no clipping)
   let caption = '';
   if (showCaption) {
     const fConcept = conceptForIndex(focusIndex);
@@ -191,14 +176,11 @@ export async function GET(req: Request) {
     const boxX = pad;
     const boxY = pad + cellH + 6;
     const boxW = width - pad * 2;
-    const lineChars = Math.max(20, Math.floor(boxW / (size === 'lg' ? 8.5 : size === 'md' ? 9.2 : 10.0))); // crude width → chars
-    const lines = wrapLines(text, lineChars).slice(0, 2); // 2 lines max for compactness
+    const lineChars = Math.max(20, Math.floor(boxW / (size === 'lg' ? 8.5 : size === 'md' ? 9.2 : 10.0)));
+    const lines = wrapLines(text, lineChars).slice(0, 2);
     const tX = boxX + captionPad;
-    const tY = boxY + captionPad + captionFS; // first baseline
-    const bg = `
-      <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${captionBoxH - 6}"
-            fill="rgba(0,0,0,0.28)" rx="4" />
-    `;
+    const tY = boxY + captionPad + captionFS;
+    const bg = `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${captionBoxH - 6}" rx="4" fill="#000000" opacity="0.28"/>`;
     const tspans = lines.map((ln, k) =>
       `<tspan x="${tX}" dy="${k === 0 ? 0 : captionFS + 2}">${esc(ln)}</tspan>`).join('');
     caption = `
@@ -208,7 +190,6 @@ export async function GET(req: Request) {
     `;
   }
 
-  // Legend row (emoji + title list)
   let legend = '';
   if (showLegend) {
     const lx = pad;
@@ -221,28 +202,6 @@ export async function GET(req: Request) {
     `;
   }
 
-  // Navigation arrows (when viewing SVG directly)
-  let nav = '';
-  if (showNav) {
-    const yMid = pad + cellH/2 + 1;
-    const prev = Math.max(0, focusIndex - 1);
-    const next = Math.min(windowSize - 1, focusIndex + 1);
-    const hrefPrev = base({ focus: prev });
-    const hrefNext = base({ focus: next });
-    nav = `
-      <a xlink:href="${esc(hrefPrev)}">
-        <text x="${pad - 6}" y="${yMid}" text-anchor="middle"
-              font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS+2}"
-              fill="#e5e7eb" opacity="0.85">◀</text>
-      </a>
-      <a xlink:href="${esc(hrefNext)}">
-        <text x="${width - pad + 6}" y="${yMid}" text-anchor="middle"
-              font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="${emojiFS+2}"
-              fill="#e5e7eb" opacity="0.85">▶</text>
-      </a>
-    `;
-  }
-
   const shineHeight = pad * 2 + cellH;
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -250,8 +209,8 @@ export async function GET(req: Request) {
   <title>Quantum Strip — ${esc(username)}</title>
   <defs>
     <linearGradient id="shine" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.06"/>
-      <stop offset="1" stop-opacity="0"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
     </linearGradient>
   </defs>
   <rect width="${width}" height="${height}" fill="${esc(tc.leftColor)}"/>
@@ -259,7 +218,6 @@ export async function GET(req: Request) {
   ${cells.join('\n')}
   ${caption}
   ${legend}
-  ${nav}
 </svg>`.trim();
 
   return new Response(svg, {
