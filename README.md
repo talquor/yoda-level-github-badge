@@ -249,3 +249,6 @@ MIT — use anywhere, contributions welcome.
 ## 🙌 Credits
 
 Built with Next.js App Router + Edge Functions. Star Wars-inspired styling for fun; not affiliated with Lucasfilm/Disney. GitHub data via REST/GraphQL APIs.
+
+
+![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=cosminmemetea&window=16&theme=jedi&edu=1)
