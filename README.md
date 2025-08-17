@@ -3,8 +3,8 @@
 Turn GitHub activity into a cinematic, Shields-style **Rank** badge — with **granular sub-ranks (I–IV)**, a colorful **XP indicator**, **Jedi/Sith themes**, **classic streaks**, and shareable **head-to-head Duels**.
 
 <p align="center">
-  <a href="https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy">
-    <img alt="Rank" src="https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy" />
+  <a href="https://yoda-level-github-badge.vercel.app/api/user-rank?username=talquor&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy">
+    <img alt="Rank" src="https://yoda-level-github-badge.vercel.app/api/user-rank?username=talquor&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy" />
   </a>
 </p>
 
@@ -251,4 +251,4 @@ MIT — use anywhere, contributions welcome.
 Built with Next.js App Router + Edge Functions. Star Wars-inspired styling for fun; not affiliated with Lucasfilm/Disney. GitHub data via REST/GraphQL APIs.
 
 
-![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=cosminmemetea&window=16&theme=jedi&edu=1)
+![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&theme=jedi&edu=1)
