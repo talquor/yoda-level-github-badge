@@ -53,6 +53,46 @@ Turn GitHub activity into a cinematic, Shields-style **Rank** badge — with **g
 ![Rank](https://yoda-level-github-badge.vercel.app/api/badge?points=82.5&label=Rank&granular=1&xp=bar&showPoints=1&showNext=1&logo=galaxy)
 ```
 
+
+**Animated (4s per concept, large, Jedi):**
+
+![Quantum Rotator](https://yoda-level-github-badge.vercel.app/api/qrotator?size=lg&theme=jedi&dur=4)
+
+
+**Animated (Sith theme, slower 8s):**
+
+![Quantum Rotator](https://yoda-level-github-badge.vercel.app/api/qrotator?size=lg&theme=sith&dur=8)
+
+
+**Static frame (e.g., Entanglement) for screenshots or if someone’s viewer doesn’t animate:**
+
+![Quantum Rotator](https://yoda-level-github-badge.vercel.app/api/qrotator?size=lg&theme=jedi&frame=entanglement)
+
+
+**Disable wrapping (if you prefer one-liners only):**
+
+![Quantum Rotator](https://yoda-level-github-badge.vercel.app/api/qrotator?size=md&wrap=0)
+
+
+**Mini rotator**
+Animated (Jedi, 4s each):
+```bash
+https://<your-app>.vercel.app/api/qrotator-mini?theme=jedi&dur=4
+
+Animated (Sith, 8s):
+https://<your-app>.vercel.app/api/qrotator-mini?theme=sith&dur=8
+
+Static frame (Entanglement):
+https://<your-app>.vercel.app/api/qrotator-mini?frame=entanglement
+
+```
+Force camo refresh while testing: add &t=now.
+
+![Quantum Concepts](https://yoda-level-github-badge.vercel.app/api/qrotator-mini?theme=jedi&dur=4)
+
+
+Tip while testing: append &t=now to force proxy recache.
+
 > Replace the domain with your deployment if different.
 
 ---
@@ -249,9 +289,3 @@ MIT — use anywhere, contributions welcome.
 ## 🙌 Credits
 
 Built with Next.js App Router + Edge Functions. Star Wars-inspired styling for fun; not affiliated with Lucasfilm/Disney. GitHub data via REST/GraphQL APIs.
-
-
-![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&theme=jedi&edu=1)
-[![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&size=lg&theme=jedi&caption=1&legend=1&click=1&nav=1)](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=32&size=lg&theme=jedi&caption=1&legend=1&click=1&nav=1)
-
-![Quantum Strip](https://yoda-level-github-badge.vercel.app/api/qstrip?username=talquor&window=16&size=lg&caption=1&focus=entanglement)
