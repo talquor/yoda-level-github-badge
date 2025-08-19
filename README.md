@@ -74,6 +74,23 @@ Turn GitHub activity into a cinematic, Shields-style **Rank** badge — with **g
 ![Quantum Rotator](https://yoda-level-github-badge.vercel.app/api/qrotator?size=md&wrap=0)
 
 
+**Mini rotator**
+Animated (Jedi, 4s each):
+```bash
+https://<your-app>.vercel.app/api/qrotator-mini?theme=jedi&dur=4
+
+Animated (Sith, 8s):
+https://<your-app>.vercel.app/api/qrotator-mini?theme=sith&dur=8
+
+Static frame (Entanglement):
+https://<your-app>.vercel.app/api/qrotator-mini?frame=entanglement
+
+```
+Force camo refresh while testing: add &t=now.
+
+![Quantum Concepts](https://yoda-level-github-badge.vercel.app/api/qrotator-mini?theme=jedi&dur=4)
+
+
 Tip while testing: append &t=now to force proxy recache.
 
 > Replace the domain with your deployment if different.
