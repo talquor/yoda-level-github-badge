@@ -1,13 +1,34 @@
 // app/api/qrotator-mini/route.ts
 import { themeColors, type Theme } from '@/lib/theme';
-import { Q_CONCEPTS, conceptForIndex, indexForKey } from '@/lib/quantum_concepts';
+import { Q_CONCEPTS, indexForKey } from '@/lib/quantum_concepts';
 import { textWidth } from '@/lib/rank';
+import {
+  fetchUserMetricsGraphQL,
+  fetchUserREST,
+  fetchReposREST,
+  fetchEventsREST,
+  fetchContributionCalendar
+} from '@/lib/github';
+import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
+import { tierWithBand } from '@/lib/rank';
+import {
+  fromContributionCalendar,
+  fromEvents,
+  normalizeDays,
+  toYMD,
+  computeClassicStreak
+} from '@/lib/streak';
 
 export const runtime = 'edge';
 
-const esc = (s:string)=> (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
 type Icon = 'github' | 'saber' | 'galaxy' | 'none';
+
+const esc = (s: string) =>
+  (s || '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
 
 const GH_LOGO_PATH =
   'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38' +
@@ -25,7 +46,7 @@ const SABER_SVG = `
     <rect x="2" y="8" width="4" height="2" rx="1" fill="#4b5563"/>
     <rect x="8" y="7" width="2" height="4" rx="1" fill="#94a3b8"/>
     <rect x="10" y="6" width="6" height="6" rx="1.5" fill="#bbf7d0"/>
-    <rect x="10" y="7" width="6" height="4" rx="1.2" fill="#34d399" />
+    <rect x="10" y="7" width="6" height="4" rx="1.2" fill="#34d399"/>
   </g>
 `;
 const GALAXY_SVG = `
@@ -44,18 +65,36 @@ function iconMarkup(icon: Icon) {
   return GALAXY_SVG;
 }
 
+function xpColor(pr: number, theme: Theme) {
+  if (theme === 'sith') {
+    if (pr < 0.25) return '#ef4444';
+    if (pr < 0.5) return '#f59e0b';
+    if (pr < 0.75) return '#facc15';
+    return '#fde047';
+  }
+  if (pr < 0.25) return '#ef4444';
+  if (pr < 0.5) return '#f59e0b';
+  if (pr < 0.75) return '#a3e635';
+  return '#22c55e';
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
+  // visual controls
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
   const tc = themeColors(theme);
-
-  const dur = Math.max(2, Math.min(20, parseInt(searchParams.get('dur') || '4', 10) || 4));
   const label = (searchParams.get('label') ?? 'Quantum').toUpperCase();
   const icon = (searchParams.get('icon') ?? 'galaxy') as Icon;
   const pad = Math.max(10, Math.min(20, parseInt(searchParams.get('pad') || '14', 10) || 14));
+  const dur = Math.max(2, Math.min(20, parseInt(searchParams.get('dur') || '4', 10) || 4)); // sec per frame
 
-  // Optional: static frame instead of animation
+  // data inputs
+  const username = searchParams.get('username') || undefined;
+  const showStreak = searchParams.get('streak') === '1';
+  const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
+
+  // optional static frame override
   let staticIdx: number | undefined;
   const frameQ = searchParams.get('frame');
   if (frameQ) {
@@ -64,31 +103,107 @@ export async function GET(req: Request) {
     else staticIdx = indexForKey(frameQ);
   }
 
-  const height = 28;
-  const radius = 4;
+  // token (Authorization header or env)
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
+  let headerToken: string | undefined;
+  {
+    const parts = authHeader.split(/\s+/);
+    if (parts.length >= 2) {
+      const scheme = parts[0].toLowerCase();
+      if (scheme === 'bearer' || scheme === 'token') headerToken = parts[1]?.trim();
+    }
+  }
+  const token = headerToken || process.env.GITHUB_TOKEN;
 
+  // compute XP progress + optional streak
+  let pr = 0; // progress ratio 0..1
+  let maxed = false;
+  let streakDays: number | undefined;
+
+  if (username) {
+    try {
+      // Prefer GraphQL metrics; fallback REST
+      const gql = await fetchUserMetricsGraphQL(username, token);
+      let points = 0;
+      let stars = 0;
+      let followers = 0;
+      if (gql) {
+        points = scoreFromGraphQL(gql);
+        stars = gql.totalStars;
+        followers = gql.followers;
+      } else {
+        const [u, repos, events] = await Promise.all([
+          fetchUserREST(username, token),
+          fetchReposREST(username, token),
+          fetchEventsREST(username, token)
+        ]);
+        points = scoreFromREST({
+          followers: u.followers ?? 0,
+          publicRepos: u.public_repos ?? 0,
+          createdAt: u.created_at ?? new Date().toISOString(),
+          repos: (repos ?? []).map((r: any) => ({
+            stargazers_count: r.stargazers_count ?? 0,
+            forks_count: r.forks_count ?? 0,
+            language: r.language ?? null,
+            pushed_at: r.pushed_at ?? null,
+            updated_at: r.updated_at ?? null
+          })),
+          events: (events ?? []).map((e: any) => ({ type: e.type, created_at: e.created_at }))
+        });
+        stars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
+        followers = u.followers ?? 0;
+      }
+
+      // legend override (e.g., Torvalds → Yoda)
+      points = applyLegendOverride(username, points, stars, followers);
+
+      const { tier, pctToNext } = tierWithBand(points);
+      pr = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
+      maxed = tier.grade === 'S++' || points >= 98;
+
+      // streak (GraphQL calendar preferred)
+      if (showStreak) {
+        try {
+          const windowDays = 120;
+          const weeks = await fetchContributionCalendar(username, token, windowDays);
+          if (weeks) {
+            const days = fromContributionCalendar(weeks);
+            const minYMD = toYMD(new Date(Date.now() - windowDays * 86400000));
+            const maxYMD = toYMD(new Date());
+            const normalized = normalizeDays(days, minYMD, maxYMD);
+            streakDays = computeClassicStreak(normalized, streakAnchor);
+          } else {
+            const events = await fetchEventsREST(username, token);
+            const approx = fromEvents(events || [], 120);
+            streakDays = computeClassicStreak(approx, streakAnchor);
+          }
+        } catch {
+          streakDays = undefined;
+        }
+      }
+    } catch {
+      // ignore XP/streak if fetch fails; badge still renders + rotates
+    }
+  }
+
+  // measure left/right widths
+  const height = 32; // a touch taller to fit two lines + XP bar
+  const radius = 4;
   const hasIcon = icon !== 'none';
   const leftTextW = textWidth(label, 'bold');
   const leftW = pad * 2 + leftTextW + (hasIcon ? 18 : 0);
 
-  // Build right texts (emoji + title) uppercased
-  const rightTexts = Q_CONCEPTS.map(c => `${c.emoji} ${c.title.toUpperCase()}`);
-  const rightW = pad * 2 + Math.max(...rightTexts.map(t => textWidth(t, 'bold')));
-
+  // Right frames = title (uppercased) + tiny equation under
+  const titles = Q_CONCEPTS.map(c => `${c.emoji} ${c.title.toUpperCase()}`);
+  const eqs = Q_CONCEPTS.map(c => c.formula);
+  const rightW = pad * 2 + Math.max(
+    ...titles.map(t => textWidth(t, 'bold')),
+    ...eqs.map(e => textWidth(e, 'normal'))
+  );
   const totalW = leftW + rightW;
 
-  // Build right-side frames
-  const frameGs: string[] = rightTexts.map((txt, i) => {
-    return `
-      <g id="rt-${i}" opacity="0">
-        <text x="${leftW + pad}" y="19" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-              font-size="12" font-weight="700" fill="#ffffff">${esc(txt)}</text>
-      </g>
-    `;
-  });
-
-  // Build SMIL opacity animations for each right frame
-  const L = rightTexts.length;
+  // Build right-side frame <g> with SMIL opacity animation
+  const L = Q_CONCEPTS.length;
   const totalDur = L * dur;
   const animFor = (idx: number) => {
     const start = (idx * dur) / totalDur;
@@ -103,16 +218,43 @@ export async function GET(req: Request) {
     `;
   };
 
-  // Left icon + label
-  const leftIcon = iconMarkup(icon);
-  const leftTextX = hasIcon ? 26 : 12;
+  const frames = Q_CONCEPTS.map((c, i) => {
+    const title = `${c.emoji} ${c.title.toUpperCase()}`;
+    const eq = c.formula;
+    const titleY = 16;        // top line
+    const eqY = 28;           // second line
+    const g = `
+      <g id="rt-${i}" opacity="0">
+        <title>${esc(c.title)} — ${esc(c.hint)}</title>
+        <text x="${leftW + pad}" y="${titleY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+              font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
+        <text x="${leftW + pad}" y="${eqY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+              font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
+      </g>
+    `;
+    return g;
+  });
 
-  // Static version (if frame=… is supplied)
+  // XP bar (bottom of right segment)
+  const prClamped = Math.max(0, Math.min(1, pr));
+  const xpFill = xpColor(prClamped, theme);
+  const barH = 3;
+  const barY = height - barH;
+  const filledW = Math.round(rightW * (maxed ? 1 : prClamped));
+
+  // Streak text (rightmost, above the bar)
+  const streakText = typeof streakDays === 'number' ? `🔥 ${streakDays}d` : '';
+
+  // If static frame is requested, no animation:
   if (typeof staticIdx === 'number') {
+    const c = Q_CONCEPTS[staticIdx];
+    const title = `${c.emoji} ${c.title.toUpperCase()}`;
+    const eq = c.formula;
+
     const svgStatic = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(label)}: ${esc(rightTexts[staticIdx])}">
-  <title>${esc(label)}: ${esc(rightTexts[staticIdx])}</title>
+     aria-label="${esc(label)}: ${esc(title)}">
+  <title>${esc(label)} • ${esc(c.title)} — ${esc(c.hint)}</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
@@ -122,17 +264,31 @@ export async function GET(req: Request) {
       <rect width="${totalW}" height="${height}" rx="${radius}" fill="#ffffff"/>
     </mask>
   </defs>
+
   <g mask="url(#round)">
     <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
+    <!-- XP bar -->
+    <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
+    <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
   </g>
 
-  ${hasIcon ? leftIcon : ''}
+  ${hasIcon ? iconMarkup(icon) : ''}
 
+  <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${leftTextX}" y="19">${esc(label)}</text>
-    <text x="${leftW + pad}" y="19">${esc(rightTexts[staticIdx])}</text>
+    <text x="${hasIcon ? 26 : 12}" y="19">${esc(label)}</text>
+  </g>
+
+  <!-- Right content (static) -->
+  <g>
+    <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
+    <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
+    ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
+          font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
   </g>
 </svg>`.trim();
 
@@ -140,18 +296,23 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'image/svg+xml; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=600, must-revalidate',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': '*',
+        'Vary': 'Authorization, Accept-Encoding'
       }
     });
   }
 
   // Animated version
-  const groups = frameGs.map((g, i) => g.replace('</g>', `${animFor(i)}</g>`)).join('\n');
+  const groups = frames
+    .map((g, i) => g.replace('</g>', `
+      ${animFor(i)}
+    </g>`))
+    .join('\n');
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(label)}: rotating quantum concepts">
-  <title>${esc(label)}: rotating quantum concepts</title>
+     aria-label="${esc(label)}: rotating concepts + xp">
+  <title>${esc(label)} — quantum concepts rotator with XP</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
@@ -162,26 +323,38 @@ export async function GET(req: Request) {
     </mask>
   </defs>
 
+  <!-- Background panes -->
   <g mask="url(#round)">
     <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
+
+    <!-- XP bar -->
+    <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
+    <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
   </g>
 
-  ${hasIcon ? leftIcon : ''}
+  ${hasIcon ? iconMarkup(icon) : ''}
 
+  <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${leftTextX}" y="19">${esc(label)}</text>
+    <text x="${hasIcon ? 26 : 12}" y="19">${esc(label)}</text>
   </g>
 
+  <!-- Right rotating frames -->
   ${groups}
+
+  <!-- Optional streak flame -->
+  ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
 </svg>`.trim();
 
   return new Response(svg, {
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=600, must-revalidate',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': '*',
+      'Vary': 'Authorization, Accept-Encoding'
     }
   });
 }

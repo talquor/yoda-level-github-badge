@@ -26,7 +26,7 @@ Turn GitHub activity into a cinematic, Shields-style **Rank** badge — with **g
 
 **Personal badge (auto):**
 ```md
-[![Rank](https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/user-rank?username=cosminmemetea)
+[![Rank](https://yoda-level-github-badge.vercel.app/api/user-rank?username=talquor&badge=1&granular=1&showPoints=1&showNext=1&streak=1&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/user-rank?username=talquor)
 ````
 
 **Torvalds (Sith theme + bar XP):**
@@ -38,13 +38,13 @@ Turn GitHub activity into a cinematic, Shields-style **Rank** badge — with **g
 **Rank Duel — Cosmin vs Torvalds:**
 
 ```md
-[![Rank Duel: cosminmemetea vs torvalds](https://yoda-level-github-badge.vercel.app/api/duel?u1=cosminmemetea&u2=torvalds&theme=jedi&xp=bar&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/duel?u1=cosminmemetea&u2=torvalds&theme=jedi&xp=bar&logo=galaxy)
+[![Rank Duel: talquor vs torvalds](https://yoda-level-github-badge.vercel.app/api/duel?u1=talquor&u2=torvalds&theme=jedi&xp=bar&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/duel?u1=talquor&u2=torvalds&theme=jedi&xp=bar&logo=galaxy)
 ```
 
 **Rank Duel — Cosmin vs drmxm:**
 
 ```md
-[![Rank Duel: cosminmemetea vs drmxm](https://yoda-level-github-badge.vercel.app/api/duel?u1=cosminmemetea&u2=drmxm&theme=jedi&xp=bar&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/duel?u1=cosminmemetea&u2=drmxm&theme=jedi&xp=bar&logo=galaxy)
+[![Rank Duel: talquor vs drmxm](https://yoda-level-github-badge.vercel.app/api/duel?u1=talquor&u2=drmxm&theme=jedi&xp=bar&logo=galaxy)](https://yoda-level-github-badge.vercel.app/api/duel?u1=talquor&u2=drmxm&theme=jedi&xp=bar&logo=galaxy)
 ```
 
 **Manual points badge (no GitHub calls):**
@@ -86,6 +86,17 @@ Static frame (Entanglement):
 https://<your-app>.vercel.app/api/qrotator-mini?frame=entanglement
 
 ```
+
+Animated, with username (XP + streak), Jedi theme:
+
+![Quantum Mini](https://yoda-level-github-badge.vercel.app/api/qrotator-mini?username=talquor&theme=jedi&dur=4&streak=1)
+
+
+Sith theme, slower rotation, show GitHub icon, custom label:
+
+![Quantum Mini](https://yoda-level-github-badge.vercel.app/api/qrotator-mini?username=talquor&theme=sith&dur=8&icon=github&label=QUANTUM)
+
+
 Force camo refresh while testing: add &t=now.
 
 ![Quantum Concepts](https://yoda-level-github-badge.vercel.app/api/qrotator-mini?theme=jedi&dur=4)
@@ -124,12 +135,12 @@ Tip while testing: append &t=now to force proxy recache.
 **JSON example**
 
 ```
-/api/user-rank?username=cosminmemetea
+/api/user-rank?username=talquor
 ```
 
 ```json
 {
-  "username": "cosminmemetea",
+  "username": "talquor",
   "points": 73.4,
   "rank": "B",
   "persona": "Rebel Pilot",
@@ -199,8 +210,8 @@ Tip while testing: append &t=now to force proxy recache.
 **Examples**
 
 ```
-/api/duel?u1=cosminmemetea&u2=torvalds&theme=jedi&xp=bar&logo=galaxy
-/api/duel?u1=cosminmemetea&u2=drmxm&theme=jedi&xp=bar&logo=galaxy
+/api/duel?u1=talquor&u2=torvalds&theme=jedi&xp=bar&logo=galaxy
+/api/duel?u1=talquor&u2=drmxm&theme=jedi&xp=bar&logo=galaxy
 ```
 
 ---
