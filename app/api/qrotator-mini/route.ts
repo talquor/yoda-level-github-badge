@@ -81,7 +81,7 @@ function xpColor(pr: number, theme: Theme) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  // visual controls
+  // Visual controls
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
   const tc = themeColors(theme);
   const label = (searchParams.get('label') ?? 'Quantum').toUpperCase();
@@ -89,12 +89,18 @@ export async function GET(req: Request) {
   const pad = Math.max(10, Math.min(20, parseInt(searchParams.get('pad') || '14', 10) || 14));
   const dur = Math.max(2, Math.min(20, parseInt(searchParams.get('dur') || '4', 10) || 4)); // sec per frame
 
-  // data inputs
+  // Data inputs
   const username = searchParams.get('username') || undefined;
   const showStreak = searchParams.get('streak') === '1';
   const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
 
-  // optional static frame override
+  // XP mode controls (NEW)
+  const xpMode = (searchParams.get('xpMode') ?? 'tier') as 'tier' | 'commits';
+  const xpPer = Math.max(1, Math.min(1000, parseInt(searchParams.get('xpPer') || '10', 10) || 10)); // XP per commit
+  const levelSize = Math.max(10, Math.min(10000, parseInt(searchParams.get('levelSize') || '100', 10) || 100)); // XP per level
+  const windowDays = Math.max(7, Math.min(365, parseInt(searchParams.get('windowDays') || '30', 10) || 30)); // rolling window for commits
+
+  // Optional static frame override
   let staticIdx: number | undefined;
   const frameQ = searchParams.get('frame');
   if (frameQ) {
@@ -103,7 +109,7 @@ export async function GET(req: Request) {
     else staticIdx = indexForKey(frameQ);
   }
 
-  // token (Authorization header or env)
+  // Token (Authorization header or env)
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   let headerToken: string | undefined;
   {
@@ -115,66 +121,90 @@ export async function GET(req: Request) {
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  // compute XP progress + optional streak
+  // Compute: XP progress + optional streak
   let pr = 0; // progress ratio 0..1
   let maxed = false;
   let streakDays: number | undefined;
 
+  let titleSuffix = ''; // optional "LVL n" text
+
   if (username) {
     try {
-      // Prefer GraphQL metrics; fallback REST
-      const gql = await fetchUserMetricsGraphQL(username, token);
-      let points = 0;
-      let stars = 0;
-      let followers = 0;
-      if (gql) {
-        points = scoreFromGraphQL(gql);
-        stars = gql.totalStars;
-        followers = gql.followers;
+      if (xpMode === 'tier') {
+        // Original behavior: progress within current tier
+        const gql = await fetchUserMetricsGraphQL(username, token);
+        let points = 0;
+        let stars = 0;
+        let followers = 0;
+        if (gql) {
+          points = scoreFromGraphQL(gql);
+          stars = gql.totalStars;
+          followers = gql.followers;
+        } else {
+          const [u, repos, events] = await Promise.all([
+            fetchUserREST(username, token),
+            fetchReposREST(username, token),
+            fetchEventsREST(username, token)
+          ]);
+          points = scoreFromREST({
+            followers: u.followers ?? 0,
+            publicRepos: u.public_repos ?? 0,
+            createdAt: u.created_at ?? new Date().toISOString(),
+            repos: (repos ?? []).map((r: any) => ({
+              stargazers_count: r.stargazers_count ?? 0,
+              forks_count: r.forks_count ?? 0,
+              language: r.language ?? null,
+              pushed_at: r.pushed_at ?? null,
+              updated_at: r.updated_at ?? null
+            })),
+            events: (events ?? []).map((e: any) => ({ type: e.type, created_at: e.created_at }))
+          });
+          stars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
+          followers = u.followers ?? 0;
+        }
+        points = applyLegendOverride(username, points, stars, followers);
+        const { tier, pctToNext } = tierWithBand(points);
+        pr = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
+        maxed = tier.grade === 'S++' || points >= 98;
+        titleSuffix = `LVL ${tier.grade}`;
       } else {
-        const [u, repos, events] = await Promise.all([
-          fetchUserREST(username, token),
-          fetchReposREST(username, token),
-          fetchEventsREST(username, token)
-        ]);
-        points = scoreFromREST({
-          followers: u.followers ?? 0,
-          publicRepos: u.public_repos ?? 0,
-          createdAt: u.created_at ?? new Date().toISOString(),
-          repos: (repos ?? []).map((r: any) => ({
-            stargazers_count: r.stargazers_count ?? 0,
-            forks_count: r.forks_count ?? 0,
-            language: r.language ?? null,
-            pushed_at: r.pushed_at ?? null,
-            updated_at: r.updated_at ?? null
-          })),
-          events: (events ?? []).map((e: any) => ({ type: e.type, created_at: e.created_at }))
-        });
-        stars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
-        followers = u.followers ?? 0;
+        // NEW: commits → XP → level → progress
+        // Pull contributions window (calendar preferred)
+        let dayCounts: { date: string; count: number }[] = [];
+        const weeks = await fetchContributionCalendar(username, token, windowDays + 1);
+        if (weeks) {
+          const days = fromContributionCalendar(weeks);
+          const minYMD = toYMD(new Date(Date.now() - windowDays * 86400000));
+          const maxYMD = toYMD(new Date());
+          dayCounts = normalizeDays(days, minYMD, maxYMD);
+        } else {
+          // REST fallback approx
+          const events = await fetchEventsREST(username, token);
+          dayCounts = fromEvents(events || [], windowDays);
+        }
+
+        const commits = dayCounts.reduce((s, d) => s + (d.count || 0), 0);
+        const xp = commits * xpPer;
+        const level = Math.floor(xp / levelSize) + 1;
+        const into = xp % levelSize;
+        pr = Math.max(0, Math.min(1, into / levelSize));
+        maxed = false; // levels keep going; no hard max here
+        titleSuffix = `LVL ${level}`;
       }
-
-      // legend override (e.g., Torvalds → Yoda)
-      points = applyLegendOverride(username, points, stars, followers);
-
-      const { tier, pctToNext } = tierWithBand(points);
-      pr = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
-      maxed = tier.grade === 'S++' || points >= 98;
 
       // streak (GraphQL calendar preferred)
       if (showStreak) {
         try {
-          const windowDays = 120;
-          const weeks = await fetchContributionCalendar(username, token, windowDays);
+          const weeks = await fetchContributionCalendar(username, token, Math.max(windowDays, 120));
           if (weeks) {
             const days = fromContributionCalendar(weeks);
-            const minYMD = toYMD(new Date(Date.now() - windowDays * 86400000));
+            const minYMD = toYMD(new Date(Date.now() - Math.max(windowDays, 120) * 86400000));
             const maxYMD = toYMD(new Date());
             const normalized = normalizeDays(days, minYMD, maxYMD);
             streakDays = computeClassicStreak(normalized, streakAnchor);
           } else {
             const events = await fetchEventsREST(username, token);
-            const approx = fromEvents(events || [], 120);
+            const approx = fromEvents(events || [], Math.max(windowDays, 120));
             streakDays = computeClassicStreak(approx, streakAnchor);
           }
         } catch {
@@ -182,27 +212,29 @@ export async function GET(req: Request) {
         }
       }
     } catch {
-      // ignore XP/streak if fetch fails; badge still renders + rotates
+      // ignore failures; still render rotator
     }
   }
 
-  // measure left/right widths
-  const height = 32; // a touch taller to fit two lines + XP bar
+  // Layout
+  const height = 32; // fits 2 lines + XP bar
   const radius = 4;
   const hasIcon = icon !== 'none';
-  const leftTextW = textWidth(label, 'bold');
+
+  const leftText = titleSuffix ? `${label} • ${titleSuffix}` : label;
+  const leftTextW = textWidth(leftText, 'bold');
   const leftW = pad * 2 + leftTextW + (hasIcon ? 18 : 0);
 
   // Right frames = title (uppercased) + tiny equation under
   const titles = Q_CONCEPTS.map(c => `${c.emoji} ${c.title.toUpperCase()}`);
-  const eqs = Q_CONCEPTS.map(c => c.formula);
+  const eqs    = Q_CONCEPTS.map(c => c.formula);
   const rightW = pad * 2 + Math.max(
     ...titles.map(t => textWidth(t, 'bold')),
     ...eqs.map(e => textWidth(e, 'normal'))
   );
   const totalW = leftW + rightW;
 
-  // Build right-side frame <g> with SMIL opacity animation
+  // SMIL anim
   const L = Q_CONCEPTS.length;
   const totalDur = L * dur;
   const animFor = (idx: number) => {
@@ -221,31 +253,28 @@ export async function GET(req: Request) {
   const frames = Q_CONCEPTS.map((c, i) => {
     const title = `${c.emoji} ${c.title.toUpperCase()}`;
     const eq = c.formula;
-    const titleY = 16;        // top line
-    const eqY = 28;           // second line
-    const g = `
+    return `
       <g id="rt-${i}" opacity="0">
         <title>${esc(c.title)} — ${esc(c.hint)}</title>
-        <text x="${leftW + pad}" y="${titleY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
               font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
-        <text x="${leftW + pad}" y="${eqY}" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
               font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
       </g>
     `;
-    return g;
   });
 
-  // XP bar (bottom of right segment)
+  // XP bar
   const prClamped = Math.max(0, Math.min(1, pr));
   const xpFill = xpColor(prClamped, theme);
   const barH = 3;
   const barY = height - barH;
   const filledW = Math.round(rightW * (maxed ? 1 : prClamped));
 
-  // Streak text (rightmost, above the bar)
+  // Streak
   const streakText = typeof streakDays === 'number' ? `🔥 ${streakDays}d` : '';
 
-  // If static frame is requested, no animation:
+  // Static frame?
   if (typeof staticIdx === 'number') {
     const c = Q_CONCEPTS[staticIdx];
     const title = `${c.emoji} ${c.title.toUpperCase()}`;
@@ -253,8 +282,8 @@ export async function GET(req: Request) {
 
     const svgStatic = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(label)}: ${esc(title)}">
-  <title>${esc(label)} • ${esc(c.title)} — ${esc(c.hint)}</title>
+     aria-label="${esc(leftText)}: ${esc(title)}">
+  <title>${esc(leftText)} • ${esc(c.title)} — ${esc(c.hint)}</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
@@ -269,19 +298,17 @@ export async function GET(req: Request) {
     <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
-    <!-- XP bar -->
+    <!-- XP -->
     <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
     <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
   </g>
 
   ${hasIcon ? iconMarkup(icon) : ''}
 
-  <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${hasIcon ? 26 : 12}" y="19">${esc(label)}</text>
+    <text x="${hasIcon ? 26 : 12}" y="19">${esc(leftText)}</text>
   </g>
 
-  <!-- Right content (static) -->
   <g>
     <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
           font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
@@ -302,17 +329,15 @@ export async function GET(req: Request) {
     });
   }
 
-  // Animated version
+  // Animated
   const groups = frames
-    .map((g, i) => g.replace('</g>', `
-      ${animFor(i)}
-    </g>`))
+    .map((g, i) => g.replace('</g>', `${animFor(i)}</g>`))
     .join('\n');
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(label)}: rotating concepts + xp">
-  <title>${esc(label)} — quantum concepts rotator with XP</title>
+     aria-label="${esc(leftText)}: rotating concepts + xp">
+  <title>${esc(leftText)} — concepts rotator with XP</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
@@ -323,28 +348,23 @@ export async function GET(req: Request) {
     </mask>
   </defs>
 
-  <!-- Background panes -->
   <g mask="url(#round)">
     <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
     <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
-
-    <!-- XP bar -->
+    <!-- XP -->
     <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
     <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
   </g>
 
   ${hasIcon ? iconMarkup(icon) : ''}
 
-  <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${hasIcon ? 26 : 12}" y="19">${esc(label)}</text>
+    <text x="${hasIcon ? 26 : 12}" y="19">${esc(leftText)}</text>
   </g>
 
-  <!-- Right rotating frames -->
   ${groups}
 
-  <!-- Optional streak flame -->
   ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
         font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
 </svg>`.trim();
