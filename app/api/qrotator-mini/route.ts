@@ -22,6 +22,7 @@ import {
 export const runtime = 'edge';
 
 type Icon = 'github' | 'saber' | 'galaxy' | 'none';
+type XpStyle = 'saber' | 'bar';
 
 const esc = (s: string) =>
   (s || '')
@@ -39,7 +40,7 @@ const GH_LOGO_PATH =
   ' .77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2' +
   ' 0 .21.15.46.55.38C13.71 14.53 16 11.54 16 8c0-4.42-3.58-8-8-8z';
 
-const SABER_SVG = `
+const SABER_ICON = `
   <g transform="translate(8,5)">
     <rect x="0" y="6" width="8" height="6" rx="1.5" fill="#e5e7eb"/>
     <rect x="1" y="7" width="6" height="4" rx="1" fill="#9ca3af"/>
@@ -49,7 +50,7 @@ const SABER_SVG = `
     <rect x="10" y="7" width="6" height="4" rx="1.2" fill="#34d399"/>
   </g>
 `;
-const GALAXY_SVG = `
+const GALAXY_ICON = `
   <g transform="translate(8,6)">
     <circle cx="6" cy="6" r="5.5" fill="none" stroke="#e5e7eb" stroke-width="1.5"/>
     <path d="M6 0 L6 12 M0 6 L12 6 M2.2 2.2 L9.8 9.8 M2.2 9.8 L9.8 2.2"
@@ -61,19 +62,20 @@ const GALAXY_SVG = `
 function iconMarkup(icon: Icon) {
   if (icon === 'none') return '';
   if (icon === 'github') return `<g transform="translate(8,6)"><path fill="#fff" d="${GH_LOGO_PATH}"/></g>`;
-  if (icon === 'saber') return SABER_SVG;
-  return GALAXY_SVG;
+  if (icon === 'saber') return SABER_ICON;
+  return GALAXY_ICON;
 }
 
+// XP color ramp
 function xpColor(pr: number, theme: Theme) {
   if (theme === 'sith') {
     if (pr < 0.25) return '#ef4444';
-    if (pr < 0.5) return '#f59e0b';
-    if (pr < 0.75) return '#facc15';
-    return '#fde047';
+    if (pr < 0.5)  return '#f97316';
+    if (pr < 0.75) return '#f59e0b';
+    return '#facc15';
   }
   if (pr < 0.25) return '#ef4444';
-  if (pr < 0.5) return '#f59e0b';
+  if (pr < 0.5)  return '#f59e0b';
   if (pr < 0.75) return '#a3e635';
   return '#22c55e';
 }
@@ -88,17 +90,18 @@ export async function GET(req: Request) {
   const icon = (searchParams.get('icon') ?? 'galaxy') as Icon;
   const pad = Math.max(10, Math.min(20, parseInt(searchParams.get('pad') || '14', 10) || 14));
   const dur = Math.max(2, Math.min(20, parseInt(searchParams.get('dur') || '4', 10) || 4)); // sec per frame
+  const xpStyle = (searchParams.get('xpStyle') ?? 'saber') as XpStyle; // NEW: 'saber' | 'bar'
 
   // Data inputs
   const username = searchParams.get('username') || undefined;
   const showStreak = searchParams.get('streak') === '1';
   const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
 
-  // XP mode controls (NEW)
+  // XP mode
   const xpMode = (searchParams.get('xpMode') ?? 'tier') as 'tier' | 'commits';
-  const xpPer = Math.max(1, Math.min(1000, parseInt(searchParams.get('xpPer') || '10', 10) || 10)); // XP per commit
-  const levelSize = Math.max(10, Math.min(10000, parseInt(searchParams.get('levelSize') || '100', 10) || 100)); // XP per level
-  const windowDays = Math.max(7, Math.min(365, parseInt(searchParams.get('windowDays') || '30', 10) || 30)); // rolling window for commits
+  const xpPer = Math.max(1, Math.min(1000, parseInt(searchParams.get('xpPer') || '10', 10) || 10)); // XP / commit
+  const levelSize = Math.max(10, Math.min(10000, parseInt(searchParams.get('levelSize') || '100', 10) || 100));
+  const windowDays = Math.max(7, Math.min(365, parseInt(searchParams.get('windowDays') || '30', 10) || 30));
 
   // Optional static frame override
   let staticIdx: number | undefined;
@@ -122,20 +125,17 @@ export async function GET(req: Request) {
   const token = headerToken || process.env.GITHUB_TOKEN;
 
   // Compute: XP progress + optional streak
-  let pr = 0; // progress ratio 0..1
+  let pr = 0; // 0..1
   let maxed = false;
   let streakDays: number | undefined;
-
-  let titleSuffix = ''; // optional "LVL n" text
+  let titleSuffix = ''; // e.g., LVL
 
   if (username) {
     try {
       if (xpMode === 'tier') {
-        // Original behavior: progress within current tier
+        // Progress within current tier
         const gql = await fetchUserMetricsGraphQL(username, token);
-        let points = 0;
-        let stars = 0;
-        let followers = 0;
+        let points = 0, stars = 0, followers = 0;
         if (gql) {
           points = scoreFromGraphQL(gql);
           stars = gql.totalStars;
@@ -168,8 +168,7 @@ export async function GET(req: Request) {
         maxed = tier.grade === 'S++' || points >= 98;
         titleSuffix = `LVL ${tier.grade}`;
       } else {
-        // NEW: commits → XP → level → progress
-        // Pull contributions window (calendar preferred)
+        // Commits → XP → Level
         let dayCounts: { date: string; count: number }[] = [];
         const weeks = await fetchContributionCalendar(username, token, windowDays + 1);
         if (weeks) {
@@ -178,21 +177,18 @@ export async function GET(req: Request) {
           const maxYMD = toYMD(new Date());
           dayCounts = normalizeDays(days, minYMD, maxYMD);
         } else {
-          // REST fallback approx
           const events = await fetchEventsREST(username, token);
           dayCounts = fromEvents(events || [], windowDays);
         }
-
         const commits = dayCounts.reduce((s, d) => s + (d.count || 0), 0);
         const xp = commits * xpPer;
         const level = Math.floor(xp / levelSize) + 1;
         const into = xp % levelSize;
         pr = Math.max(0, Math.min(1, into / levelSize));
-        maxed = false; // levels keep going; no hard max here
+        maxed = false; // rolling levels; no cap
         titleSuffix = `LVL ${level}`;
       }
 
-      // streak (GraphQL calendar preferred)
       if (showStreak) {
         try {
           const weeks = await fetchContributionCalendar(username, token, Math.max(windowDays, 120));
@@ -217,15 +213,14 @@ export async function GET(req: Request) {
   }
 
   // Layout
-  const height = 32; // fits 2 lines + XP bar
+  const height = 36; // a touch taller to fit saber nicely
   const radius = 4;
   const hasIcon = icon !== 'none';
-
   const leftText = titleSuffix ? `${label} • ${titleSuffix}` : label;
   const leftTextW = textWidth(leftText, 'bold');
   const leftW = pad * 2 + leftTextW + (hasIcon ? 18 : 0);
 
-  // Right frames = title (uppercased) + tiny equation under
+  // Right side text widths
   const titles = Q_CONCEPTS.map(c => `${c.emoji} ${c.title.toUpperCase()}`);
   const eqs    = Q_CONCEPTS.map(c => c.formula);
   const rightW = pad * 2 + Math.max(
@@ -264,58 +259,123 @@ export async function GET(req: Request) {
     `;
   });
 
-  // XP bar
+  // XP visuals
   const prClamped = Math.max(0, Math.min(1, pr));
-  const xpFill = xpColor(prClamped, theme);
-  const barH = 3;
-  const barY = height - barH;
-  const filledW = Math.round(rightW * (maxed ? 1 : prClamped));
+  const saberColor = xpColor(prClamped, theme);
 
-  // Streak
+  // Saber geometry (bottom of right half)
+  const saberY = height - 6;                // baseline
+  const hiltW = 18;                         // hilt on the left of right pane
+  const bladeH = 4;
+  const bladeMax = Math.max(0, rightW - hiltW - pad);
+  const bladeLen = Math.round(bladeMax * (maxed ? 1 : prClamped));
   const streakText = typeof streakDays === 'number' ? `🔥 ${streakDays}d` : '';
 
-  // Static frame?
-  if (typeof staticIdx === 'number') {
-    const c = Q_CONCEPTS[staticIdx];
+  // Optional static frame?
+  const renderStaticRight = (idx: number) => {
+    const c = Q_CONCEPTS[idx];
     const title = `${c.emoji} ${c.title.toUpperCase()}`;
     const eq = c.formula;
+    return `
+      <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+            font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
+      <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+            font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
+      ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
+            font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
+    `;
+  };
 
-    const svgStatic = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(leftText)}: ${esc(title)}">
-  <title>${esc(leftText)} • ${esc(c.title)} — ${esc(c.hint)}</title>
-  <defs>
+  // Saber defs (glow + blade gradient)
+  const defs = `
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
       <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
     </linearGradient>
+
+    <linearGradient id="blade-grad" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0"   stop-color="${esc(saberColor)}" stop-opacity="0.9"/>
+      <stop offset="0.2" stop-color="${esc(saberColor)}" stop-opacity="1"/>
+      <stop offset="1"   stop-color="${esc(saberColor)}" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <radialGradient id="blade-glow" cx="0" cy="0.5" r="1">
+      <stop offset="0"   stop-color="${esc(saberColor)}" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="${esc(saberColor)}" stop-opacity="0.22"/>
+      <stop offset="1"   stop-color="${esc(saberColor)}" stop-opacity="0"/>
+    </radialGradient>
+
     <mask id="round">
       <rect width="${totalW}" height="${height}" rx="${radius}" fill="#ffffff"/>
     </mask>
-  </defs>
+  `;
 
-  <g mask="url(#round)">
-    <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
-    <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
-    <rect width="${totalW}" height="${height}" fill="url(#g)"/>
-    <!-- XP -->
-    <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
-    <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
-  </g>
+  // Saber group renderer
+  const saberGroup = `
+    <!-- Hilt -->
+    <g transform="translate(${leftW + pad}, ${saberY - bladeH})">
+      <rect x="0" y="0" width="${hiltW}" height="${bladeH}" rx="1.5" fill="#9ca3af"/>
+      <rect x="2" y="1" width="${hiltW - 4}" height="${bladeH - 2}" rx="1" fill="#4b5563"/>
+      <rect x="${hiltW - 3}" y="0" width="3" height="${bladeH}" rx="1" fill="#e5e7eb"/>
+    </g>
 
-  ${hasIcon ? iconMarkup(icon) : ''}
+    <!-- Blade base (dim track) -->
+    <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH}" width="${bladeMax}" height="${bladeH}" rx="2" fill="#000000" opacity="0.20"/>
+
+    <!-- Blade glow area -->
+    <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH - 2}" width="${Math.max(0, bladeLen)}" height="${bladeH + 4}"
+          fill="url(#blade-glow)"/>
+
+    <!-- Blade core -->
+    <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH}" width="${Math.max(0, bladeLen)}" height="${bladeH}" rx="2" fill="url(#blade-grad)"/>
+
+    ${maxed ? `
+      <!-- Maxed pulse -->
+      <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH - 2}" width="${bladeMax}" height="${bladeH + 4}"
+            fill="url(#blade-glow)">
+        <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.6s" repeatCount="indefinite"/>
+      </rect>
+    ` : ''}
+  `;
+
+  // Build SVG — static frame or animated groups
+  const leftIcon = iconMarkup(icon);
+  const leftTextX = hasIcon ? 26 : 12;
+
+  const baseBg = `
+    <g mask="url(#round)">
+      <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
+      <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
+      <rect width="${totalW}" height="${height}" fill="url(#g)"/>
+    </g>
+  `;
+
+  // Static?
+  if (typeof staticIdx === 'number') {
+    const svgStatic = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
+     aria-label="${esc(leftText)}: concept + XP ${xpStyle}">
+  <title>${esc(leftText)} — concept rotator (static) with XP ${xpStyle}</title>
+  <defs>${defs}</defs>
+
+  ${baseBg}
+  ${hasIcon ? leftIcon : ''}
 
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${hasIcon ? 26 : 12}" y="19">${esc(leftText)}</text>
+    <text x="${leftTextX}" y="20">${esc(leftText)}</text>
   </g>
 
+  <!-- Right content -->
   <g>
-    <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-          font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
-    <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-          font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
-    ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
-          font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
+    ${renderStaticRight(staticIdx)}
+    ${xpStyle === 'saber'
+      ? saberGroup
+      : `
+        <!-- fallback classic bar -->
+        <rect x="${leftW}" y="${height - 3}" width="${rightW}" height="3" fill="#000000" opacity="0.22"/>
+        <rect x="${leftW}" y="${height - 3}" width="${Math.round(rightW * (maxed ? 1 : prClamped))}" height="3"
+              fill="${esc(saberColor)}" opacity="${maxed ? '1' : '0.95'}"/>
+      `}
   </g>
 </svg>`.trim();
 
@@ -329,42 +389,36 @@ export async function GET(req: Request) {
     });
   }
 
-  // Animated
-  const groups = frames
-    .map((g, i) => g.replace('</g>', `${animFor(i)}</g>`))
-    .join('\n');
+  // Animated groups
+  const groups = frames.map((g, i) => g.replace('</g>', `${animFor(i)}</g>`)).join('\n');
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
-     aria-label="${esc(leftText)}: rotating concepts + xp">
-  <title>${esc(leftText)} — concepts rotator with XP</title>
-  <defs>
-    <linearGradient id="g" x2="0" y2="100%">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
-    </linearGradient>
-    <mask id="round">
-      <rect width="${totalW}" height="${height}" rx="${radius}" fill="#ffffff"/>
-    </mask>
-  </defs>
+     aria-label="${esc(leftText)}: rotating concepts + XP ${xpStyle}">
+  <title>${esc(leftText)} — rotating concepts with XP ${xpStyle}</title>
+  <defs>${defs}</defs>
 
-  <g mask="url(#round)">
-    <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
-    <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
-    <rect width="${totalW}" height="${height}" fill="url(#g)"/>
-    <!-- XP -->
-    <rect x="${leftW}" y="${barY}" width="${rightW}" height="${barH}" fill="#000000" opacity="0.22"/>
-    <rect x="${leftW}" y="${barY}" width="${filledW}" height="${barH}" fill="${esc(xpFill)}" opacity="${maxed ? '1' : '0.95'}"/>
-  </g>
+  ${baseBg}
+  ${hasIcon ? leftIcon : ''}
 
-  ${hasIcon ? iconMarkup(icon) : ''}
-
+  <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${hasIcon ? 26 : 12}" y="19">${esc(leftText)}</text>
+    <text x="${leftTextX}" y="20">${esc(leftText)}</text>
   </g>
 
+  <!-- Right rotating frames -->
   ${groups}
 
+  <!-- XP visual -->
+  ${xpStyle === 'saber'
+    ? saberGroup
+    : `
+      <rect x="${leftW}" y="${height - 3}" width="${rightW}" height="3" fill="#000000" opacity="0.22"/>
+      <rect x="${leftW}" y="${height - 3}" width="${Math.round(rightW * (maxed ? 1 : prClamped))}" height="3"
+            fill="${esc(saberColor)}" opacity="${maxed ? '1' : '0.95'}"/>
+    `}
+
+  <!-- Optional streak -->
   ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
         font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
 </svg>`.trim();
