@@ -213,7 +213,7 @@ export async function GET(req: Request) {
   }
 
   // Layout
-  const height = 36; // a touch taller to fit saber nicely
+  const height = 42; // a touch taller to fit saber nicely
   const radius = 4;
   const hasIcon = icon !== 'none';
   const leftText = titleSuffix ? `${label} • ${titleSuffix}` : label;
@@ -362,7 +362,7 @@ export async function GET(req: Request) {
   ${hasIcon ? leftIcon : ''}
 
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${leftTextX}" y="20">${esc(leftText)}</text>
+    <text x="${leftTextX}" y="22">${esc(leftText)}</text>
   </g>
 
   <!-- Right content -->
@@ -403,7 +403,7 @@ export async function GET(req: Request) {
 
   <!-- Left label -->
   <g fill="#ffffff" font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="12" font-weight="700">
-    <text x="${leftTextX}" y="20">${esc(leftText)}</text>
+    <text x="${leftTextX}" y="22">${esc(leftText)}</text>
   </g>
 
   <!-- Right rotating frames -->
