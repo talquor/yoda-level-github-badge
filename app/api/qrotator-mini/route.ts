@@ -15,7 +15,7 @@ import {
   fromContributionCalendar,
   fromEvents,
   normalizeDays,
-  toYMD,
+  toYMDUTC,
   computeClassicStreak
 } from '@/lib/streak';
 
@@ -90,7 +90,8 @@ export async function GET(req: Request) {
   const icon = (searchParams.get('icon') ?? 'galaxy') as Icon;
   const pad = Math.max(10, Math.min(20, parseInt(searchParams.get('pad') || '14', 10) || 14));
   const dur = Math.max(2, Math.min(20, parseInt(searchParams.get('dur') || '4', 10) || 4)); // sec per frame
-  const xpStyle = (searchParams.get('xpStyle') ?? 'saber') as XpStyle; // NEW: 'saber' | 'bar'
+  const xpStyle = (searchParams.get('xpStyle') ?? 'saber') as XpStyle; // 'saber' | 'bar'
+  const burst = (searchParams.get('burst') ?? '1') === '1'; // enable level-up burst by default
 
   // Data inputs
   const username = searchParams.get('username') || undefined;
@@ -129,6 +130,7 @@ export async function GET(req: Request) {
   let maxed = false;
   let streakDays: number | undefined;
   let titleSuffix = ''; // e.g., LVL
+  let showBurst = false;
 
   if (username) {
     try {
@@ -173,8 +175,8 @@ export async function GET(req: Request) {
         const weeks = await fetchContributionCalendar(username, token, windowDays + 1);
         if (weeks) {
           const days = fromContributionCalendar(weeks);
-          const minYMD = toYMD(new Date(Date.now() - windowDays * 86400000));
-          const maxYMD = toYMD(new Date());
+          const minYMD = toYMDUTC(new Date(Date.now() - windowDays * 86400000));
+          const maxYMD = toYMDUTC(new Date());
           dayCounts = normalizeDays(days, minYMD, maxYMD);
         } else {
           const events = await fetchEventsREST(username, token);
@@ -187,6 +189,10 @@ export async function GET(req: Request) {
         pr = Math.max(0, Math.min(1, into / levelSize));
         maxed = false; // rolling levels; no cap
         titleSuffix = `LVL ${level}`;
+
+        // Level-up burst near wrap (first ~6% of bar after wrap)
+        const leveledUp = into < Math.max(6, levelSize * 0.06);
+        showBurst = burst && leveledUp;
       }
 
       if (showStreak) {
@@ -194,8 +200,8 @@ export async function GET(req: Request) {
           const weeks = await fetchContributionCalendar(username, token, Math.max(windowDays, 120));
           if (weeks) {
             const days = fromContributionCalendar(weeks);
-            const minYMD = toYMD(new Date(Date.now() - Math.max(windowDays, 120) * 86400000));
-            const maxYMD = toYMD(new Date());
+            const minYMD = toYMDUTC(new Date(Date.now() - Math.max(windowDays, 120) * 86400000));
+            const maxYMD = toYMDUTC(new Date());
             const normalized = normalizeDays(days, minYMD, maxYMD);
             streakDays = computeClassicStreak(normalized, streakAnchor);
           } else {
@@ -212,8 +218,8 @@ export async function GET(req: Request) {
     }
   }
 
-  // Layout
-  const height = 42; // a touch taller to fit saber nicely
+  // Layout (taller to avoid overlap)
+  const height = 42;
   const radius = 4;
   const hasIcon = icon !== 'none';
   const leftText = titleSuffix ? `${label} • ${titleSuffix}` : label;
@@ -264,7 +270,7 @@ export async function GET(req: Request) {
   const saberColor = xpColor(prClamped, theme);
 
   // Saber geometry (bottom of right half)
-  const saberY = height - 6;                // baseline
+  const saberY = height - 6;                // baseline stays 6px above bottom
   const hiltW = 18;                         // hilt on the left of right pane
   const bladeH = 4;
   const bladeMax = Math.max(0, rightW - hiltW - pad);
@@ -310,7 +316,7 @@ export async function GET(req: Request) {
     </mask>
   `;
 
-  // Saber group renderer
+  // Saber group (with optional level-up burst)
   const saberGroup = `
     <!-- Hilt -->
     <g transform="translate(${leftW + pad}, ${saberY - bladeH})">
@@ -336,12 +342,32 @@ export async function GET(req: Request) {
         <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.6s" repeatCount="indefinite"/>
       </rect>
     ` : ''}
+
+    ${showBurst && bladeLen > 12 ? `
+      <!-- Level-up burst: star sweeps along the blade -->
+      <g>
+        <circle r="2" fill="#ffffff">
+          <animate attributeName="cx"
+                   from="${leftW + pad + hiltW + 3}"
+                   to="${leftW + pad + hiltW + bladeLen - 3}"
+                   dur="0.9s"
+                   repeatCount="1" />
+          <animate attributeName="cy"
+                   values="${saberY - bladeH + 1}; ${saberY - bladeH - 1}; ${saberY - bladeH + 1}"
+                   dur="0.9s"
+                   repeatCount="1" />
+          <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.8;1" dur="0.9s" repeatCount="1"/>
+        </circle>
+        <!-- trailing sparkle -->
+        <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH - 2}"
+              width="${bladeLen}" height="${bladeH + 4}" fill="url(#blade-glow)">
+          <animate attributeName="opacity" values="0.4;0" dur="0.9s" repeatCount="1"/>
+        </rect>
+      </g>
+    ` : ''}
   `;
 
-  // Build SVG — static frame or animated groups
-  const leftIcon = iconMarkup(icon);
-  const leftTextX = hasIcon ? 26 : 12;
-
+  // Background panes
   const baseBg = `
     <g mask="url(#round)">
       <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
@@ -350,7 +376,10 @@ export async function GET(req: Request) {
     </g>
   `;
 
-  // Static?
+  const leftIcon = iconMarkup(icon);
+  const leftTextX = hasIcon ? 26 : 12;
+
+  // Static frame?
   if (typeof staticIdx === 'number') {
     const svgStatic = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
