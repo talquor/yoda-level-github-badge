@@ -1,6 +1,6 @@
 // app/api/qstrip/route.ts
 import { fetchContributionCalendar, fetchEventsREST } from '@/lib/github';
-import { fromContributionCalendar, fromEvents, normalizeDays, toYMD } from '@/lib/streak';
+import { fromContributionCalendar, fromEvents, normalizeDays, toYMDUTC } from '@/lib/streak';
 import { themeColors, type Theme } from '@/lib/theme';
 import { conceptForIndex, Q_CONCEPTS } from '@/lib/quantum_concepts';
 
@@ -95,8 +95,8 @@ export async function GET(req: Request) {
     const weeks = await fetchContributionCalendar(username, token, daysBack);
     if (weeks) {
       const days = fromContributionCalendar(weeks);
-      const minYMD = toYMD(new Date(Date.now() - daysBack * 86400000));
-      const maxYMD = toYMD(new Date());
+      const minYMD = toYMDUTC(new Date(Date.now() - daysBack * 86400000));
+      const maxYMD = toYMDUTC(new Date());
       const normalized = normalizeDays(days, minYMD, maxYMD);
       counts = normalized.slice(-windowSize).map(d => d.count || 0);
     } else {
