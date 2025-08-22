@@ -170,7 +170,7 @@ export async function GET(req: Request) {
         maxed = tier.grade === 'S++' || points >= 98;
         titleSuffix = `LVL ${tier.grade}`;
       } else {
-        // Commits → XP → Level
+        // Commits → XP → Level (rolling window)
         let dayCounts: { date: string; count: number }[] = [];
         const weeks = await fetchContributionCalendar(username, token, windowDays + 1);
         if (weeks) {
@@ -277,7 +277,7 @@ export async function GET(req: Request) {
   const bladeLen = Math.round(bladeMax * (maxed ? 1 : prClamped));
   const streakText = typeof streakDays === 'number' ? `🔥 ${streakDays}d` : '';
 
-  // Optional static frame?
+  // Right content renderer for static frame
   const renderStaticRight = (idx: number) => {
     const c = Q_CONCEPTS[idx];
     const title = `${c.emoji} ${c.title.toUpperCase()}`;

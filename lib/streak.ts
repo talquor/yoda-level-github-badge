@@ -1,9 +1,7 @@
 // lib/streak.ts
-/**
- * Streak utilities
- * - classic: consecutive days (from anchor backward) with ≥1 contribution.
- * - momentum: consecutive days where the rolling-7-day sum strictly increases vs the previous day.
- */
+
+/** Public types */
+export type DayCount = { date: string; count: number };
 
 /** UTC-safe YYYY-MM-DD for any Date/string input */
 export function toYMDUTC(d: string | Date): string {
@@ -14,12 +12,10 @@ export function toYMDUTC(d: string | Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Today in UTC (GitHub contribution calendar uses YYYY-MM-DD day keys) */
+/** Today in UTC (GitHub contribution calendar uses day keys in UTC) */
 export function todayYMDUTC(): string {
   return toYMDUTC(new Date());
 }
-
-export type DayCount = { date: string; count: number };
 
 /**
  * Normalize a sparse list of {date:YYYY-MM-DD,count} to a dense, inclusive
@@ -66,7 +62,7 @@ export function fromEvents(events: any[], windowDays: number): DayCount[] {
   const minUTC = toYMDUTC(new Date(Date.now() - windowDays * 86400000));
   const bin = new Map<string, number>();
   for (const e of events || []) {
-    const ymd = toYMDUTC(e.created_at || e.createdAt || e.timestamp || new Date());
+    const ymd = toYMDUTC(e?.created_at || e?.createdAt || e?.timestamp || new Date());
     bin.set(ymd, (bin.get(ymd) ?? 0) + 1);
   }
   return normalizeDays(
@@ -78,8 +74,8 @@ export function fromEvents(events: any[], windowDays: number): DayCount[] {
 
 /**
  * Classic streak:
- * - anchor = 'today'  -> walk back from today UTC
- * - anchor = 'lastActive' -> walk back from the latest date with count>0
+ * - anchor = 'today'       -> walk back from today UTC
+ * - anchor = 'lastActive'  -> walk back from the latest date with count>0
  * Count consecutive days with count>0 with no 0-day gaps.
  */
 export function computeClassicStreak(
