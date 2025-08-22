@@ -15,7 +15,7 @@ import {
   fromContributionCalendar,
   fromEvents,
   normalizeDays,
-  toYMD
+  toYMDUTC
 } from '@/lib/streak';
 
 export const runtime = 'edge';
@@ -48,18 +48,11 @@ export async function GET(req: Request) {
   const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
   const streakDaysBack = Math.max(30, Math.min(365, parseInt(searchParams.get('streakWindow') || '120', 10) || 120));
 
-  // 🔐 Token priority: Authorization header > env (support "Bearer" or legacy "token")
-  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
-  let headerToken: string | undefined;
-  {
-    const parts = authHeader.split(/\s+/);
-    if (parts.length >= 2) {
-      const scheme = parts[0].toLowerCase();
-      if (scheme === 'bearer' || scheme === 'token') {
-        headerToken = parts[1]?.trim();
-      }
-    }
-  }
+  // 🔐 Token priority: Authorization header > env
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+  const headerToken = authHeader?.toLowerCase().startsWith('bearer ')
+    ? authHeader.split(/\s+/)[1]
+    : undefined;
   const token = headerToken || process.env.GITHUB_TOKEN;
 
   let points = 0;
@@ -101,14 +94,11 @@ export async function GET(req: Request) {
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message || 'GitHub fetch failed' }), {
       status: 502,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Vary': 'Authorization, Accept-Encoding'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 
+  // Legends override (e.g., Torvalds)
   points = applyLegendOverride(username, points, approxStars, approxFollowers);
 
   const { tier, bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(points);
@@ -121,8 +111,8 @@ export async function GET(req: Request) {
       const weeks = await fetchContributionCalendar(username, token, streakDaysBack);
       if (weeks) {
         const days = fromContributionCalendar(weeks);
-        const minYMD = toYMD(new Date(Date.now() - streakDaysBack * 86400000));
-        const maxYMD = toYMD(new Date());
+        const minYMD = toYMDUTC(new Date(Date.now() - streakDaysBack * 86400000));
+        const maxYMD = toYMDUTC(new Date());
         const normalized = normalizeDays(days, minYMD, maxYMD);
         streakDays =
           streakMode === 'momentum'
@@ -166,8 +156,7 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'image/svg+xml; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=1200, must-revalidate',
-        'Access-Control-Allow-Origin': '*',
-        'Vary': 'Authorization, Accept-Encoding'
+        'Access-Control-Allow-Origin': '*'
       }
     });
   }
@@ -183,11 +172,6 @@ export async function GET(req: Request) {
     granular: { band: bandRoman, nextTier: nextTier?.name, pointsToNext, pctWithinTier: pctToNext },
     tiers: TIERS.map(t => ({ grade: t.grade, name: t.name, min: t.min }))
   }), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=0, s-maxage=300, must-revalidate',
-      'Vary': 'Authorization, Accept-Encoding'
-    }
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   });
 }
