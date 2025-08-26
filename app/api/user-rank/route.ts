@@ -15,7 +15,8 @@ import {
   fromContributionCalendar,
   fromEvents,
   normalizeDays,
-  toYMDUTC
+  toYMDUTC,
+  mergeDaysMax
 } from '@/lib/streak';
 
 export const runtime = 'edge';
@@ -47,6 +48,7 @@ export async function GET(req: Request) {
   const streakMode   = (searchParams.get('streakMode') ?? 'classic') as StreakMode;
   const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
   const streakDaysBack = Math.max(30, Math.min(365, parseInt(searchParams.get('streakWindow') || '120', 10) || 120));
+  const streakSource = (searchParams.get('streakSource') ?? 'calendar') as 'calendar' | 'events' | 'hybrid';
 
   // 🔐 Token priority: Authorization header > env
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
@@ -104,28 +106,37 @@ export async function GET(req: Request) {
   const { tier, bandRoman, nextTier, pointsToNext, pctToNext } = tierWithBand(points);
   const progressRatio = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
 
-  // STREAK: GraphQL calendar preferred; REST events fallback
+  // STREAK
   let streakDays: number | undefined = undefined;
   if (showStreak) {
     try {
-      const weeks = await fetchContributionCalendar(username, token, streakDaysBack);
-      if (weeks) {
-        const days = fromContributionCalendar(weeks);
-        const minYMD = toYMDUTC(new Date(Date.now() - streakDaysBack * 86400000));
-        const maxYMD = toYMDUTC(new Date());
-        const normalized = normalizeDays(days, minYMD, maxYMD);
-        streakDays =
-          streakMode === 'momentum'
-            ? computeMomentumStreak(normalized)
-            : computeClassicStreak(normalized, streakAnchor);
-      } else {
-        const events = await fetchEventsREST(username, token);
-        const approxDays = fromEvents(events || [], streakDaysBack);
-        streakDays =
-          streakMode === 'momentum'
-            ? computeMomentumStreak(approxDays)
-            : computeClassicStreak(approxDays, streakAnchor);
+      const minYMD = toYMDUTC(new Date(Date.now() - streakDaysBack * 86400000));
+      const maxYMD = toYMDUTC(new Date());
+
+      let byCal: { date: string; count: number }[] | undefined;
+      let byEvt: { date: string; count: number }[] | undefined;
+
+      if (streakSource !== 'events') {
+        const weeks = await fetchContributionCalendar(username, token, streakDaysBack);
+        if (weeks) {
+          const days = fromContributionCalendar(weeks);
+          byCal = normalizeDays(days, minYMD, maxYMD);
+        }
       }
+      if (streakSource !== 'calendar') {
+        const events = await fetchEventsREST(username, token);
+        byEvt = fromEvents(events || [], streakDaysBack);
+      }
+
+      const chosen =
+        streakSource === 'calendar' ? (byCal || []) :
+        streakSource === 'events'   ? (byEvt || [])  :
+        mergeDaysMax(byCal || [], byEvt || []);
+
+      streakDays =
+        streakMode === 'momentum'
+          ? computeMomentumStreak(chosen)
+          : computeClassicStreak(chosen, streakAnchor);
     } catch {
       streakDays = undefined;
     }
