@@ -16,13 +16,15 @@ import {
   fromEvents,
   normalizeDays,
   toYMDUTC,
-  computeClassicStreak
+  computeClassicStreak,
+  mergeDaysMax
 } from '@/lib/streak';
 
 export const runtime = 'edge';
 
 type Icon = 'github' | 'saber' | 'galaxy' | 'none';
 type XpStyle = 'saber' | 'bar';
+type ThemeK = 'jedi' | 'sith';
 
 const esc = (s: string) =>
   (s || '')
@@ -66,8 +68,7 @@ function iconMarkup(icon: Icon) {
   return GALAXY_ICON;
 }
 
-// XP color ramp
-function xpColor(pr: number, theme: Theme) {
+function xpColor(pr: number, theme: ThemeK) {
   if (theme === 'sith') {
     if (pr < 0.25) return '#ef4444';
     if (pr < 0.5)  return '#f97316';
@@ -84,7 +85,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
   // Visual controls
-  const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
+  const theme = (searchParams.get('theme') ?? 'jedi') as ThemeK;
   const tc = themeColors(theme);
   const label = (searchParams.get('label') ?? 'Quantum').toUpperCase();
   const icon = (searchParams.get('icon') ?? 'galaxy') as Icon;
@@ -97,6 +98,7 @@ export async function GET(req: Request) {
   const username = searchParams.get('username') || undefined;
   const showStreak = searchParams.get('streak') === '1';
   const streakAnchor = (searchParams.get('streakAnchor') ?? 'lastActive') as 'today' | 'lastActive';
+  const streakSource = (searchParams.get('streakSource') ?? 'calendar') as 'calendar' | 'events' | 'hybrid';
 
   // XP mode
   const xpMode = (searchParams.get('xpMode') ?? 'tier') as 'tier' | 'commits';
@@ -167,7 +169,7 @@ export async function GET(req: Request) {
         points = applyLegendOverride(username, points, stars, followers);
         const { tier, pctToNext } = tierWithBand(points);
         pr = Math.max(0, Math.min(1, (pctToNext ?? 0) / 100));
-        maxed = tier.grade === 'S++' || points >= 98;
+        maxed = (pctToNext ?? 0) <= 0; // S++ etc
         titleSuffix = `LVL ${tier.grade}`;
       } else {
         // Commits → XP → Level (rolling window)
@@ -190,25 +192,37 @@ export async function GET(req: Request) {
         maxed = false; // rolling levels; no cap
         titleSuffix = `LVL ${level}`;
 
-        // Level-up burst near wrap (first ~6% of bar after wrap)
+        // Level-up burst near wrap (first ~6% after wrap)
         const leveledUp = into < Math.max(6, levelSize * 0.06);
         showBurst = burst && leveledUp;
       }
 
       if (showStreak) {
         try {
-          const weeks = await fetchContributionCalendar(username, token, Math.max(windowDays, 120));
-          if (weeks) {
-            const days = fromContributionCalendar(weeks);
-            const minYMD = toYMDUTC(new Date(Date.now() - Math.max(windowDays, 120) * 86400000));
-            const maxYMD = toYMDUTC(new Date());
-            const normalized = normalizeDays(days, minYMD, maxYMD);
-            streakDays = computeClassicStreak(normalized, streakAnchor);
-          } else {
-            const events = await fetchEventsREST(username, token);
-            const approx = fromEvents(events || [], Math.max(windowDays, 120));
-            streakDays = computeClassicStreak(approx, streakAnchor);
+          const minYMD = toYMDUTC(new Date(Date.now() - Math.max(windowDays, 120) * 86400000));
+          const maxYMD = toYMDUTC(new Date());
+
+          let byCal: { date: string; count: number }[] | undefined;
+          let byEvt: { date: string; count: number }[] | undefined;
+
+          if (streakSource !== 'events') {
+            const weeks = await fetchContributionCalendar(username, token, Math.max(windowDays, 120));
+            if (weeks) {
+              const days = fromContributionCalendar(weeks);
+              byCal = normalizeDays(days, minYMD, maxYMD);
+            }
           }
+          if (streakSource !== 'calendar') {
+            const events = await fetchEventsREST(username, token);
+            byEvt = fromEvents(events || [], Math.max(windowDays, 120));
+          }
+
+          const chosen =
+            streakSource === 'calendar' ? (byCal || []) :
+            streakSource === 'events'   ? (byEvt || [])  :
+            mergeDaysMax(byCal || [], byEvt || []);
+
+          streakDays = computeClassicStreak(chosen, streakAnchor);
         } catch {
           streakDays = undefined;
         }
@@ -220,7 +234,6 @@ export async function GET(req: Request) {
 
   // Layout (taller to avoid overlap)
   const height = 42;
-  const radius = 4;
   const hasIcon = icon !== 'none';
   const leftText = titleSuffix ? `${label} • ${titleSuffix}` : label;
   const leftTextW = textWidth(leftText, 'bold');
@@ -265,34 +278,18 @@ export async function GET(req: Request) {
     `;
   });
 
-  // XP visuals
   const prClamped = Math.max(0, Math.min(1, pr));
   const saberColor = xpColor(prClamped, theme);
 
-  // Saber geometry (bottom of right half)
-  const saberY = height - 6;                // baseline stays 6px above bottom
-  const hiltW = 18;                         // hilt on the left of right pane
+  // Saber geometry
+  const radius = 4;
+  const saberY = height - 6;
+  const hiltW = 18;
   const bladeH = 4;
   const bladeMax = Math.max(0, rightW - hiltW - pad);
   const bladeLen = Math.round(bladeMax * (maxed ? 1 : prClamped));
   const streakText = typeof streakDays === 'number' ? `🔥 ${streakDays}d` : '';
 
-  // Right content renderer for static frame
-  const renderStaticRight = (idx: number) => {
-    const c = Q_CONCEPTS[idx];
-    const title = `${c.emoji} ${c.title.toUpperCase()}`;
-    const eq = c.formula;
-    return `
-      <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-            font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
-      <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-            font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
-      ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
-            font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
-    `;
-  };
-
-  // Saber defs (glow + blade gradient)
   const defs = `
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
@@ -316,7 +313,17 @@ export async function GET(req: Request) {
     </mask>
   `;
 
-  // Saber group (with optional level-up burst)
+  const baseBg = `
+    <g mask="url(#round)">
+      <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
+      <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
+      <rect width="${totalW}" height="${height}" fill="url(#g)"/>
+    </g>
+  `;
+
+  const leftIcon = iconMarkup(icon);
+  const leftTextX = hasIcon ? 26 : 12;
+
   const saberGroup = `
     <!-- Hilt -->
     <g transform="translate(${leftW + pad}, ${saberY - bladeH})">
@@ -325,14 +332,14 @@ export async function GET(req: Request) {
       <rect x="${hiltW - 3}" y="0" width="3" height="${bladeH}" rx="1" fill="#e5e7eb"/>
     </g>
 
-    <!-- Blade base (dim track) -->
+    <!-- Blade track -->
     <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH}" width="${bladeMax}" height="${bladeH}" rx="2" fill="#000000" opacity="0.20"/>
 
-    <!-- Blade glow area -->
+    <!-- Glow -->
     <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH - 2}" width="${Math.max(0, bladeLen)}" height="${bladeH + 4}"
           fill="url(#blade-glow)"/>
 
-    <!-- Blade core -->
+    <!-- Core -->
     <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH}" width="${Math.max(0, bladeLen)}" height="${bladeH}" rx="2" fill="url(#blade-grad)"/>
 
     ${maxed ? `
@@ -342,9 +349,8 @@ export async function GET(req: Request) {
         <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.6s" repeatCount="indefinite"/>
       </rect>
     ` : ''}
-
     ${showBurst && bladeLen > 12 ? `
-      <!-- Level-up burst: star sweeps along the blade -->
+      <!-- Level-up burst -->
       <g>
         <circle r="2" fill="#ffffff">
           <animate attributeName="cx"
@@ -358,7 +364,6 @@ export async function GET(req: Request) {
                    repeatCount="1" />
           <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.8;1" dur="0.9s" repeatCount="1"/>
         </circle>
-        <!-- trailing sparkle -->
         <rect x="${leftW + pad + hiltW}" y="${saberY - bladeH - 2}"
               width="${bladeLen}" height="${bladeH + 4}" fill="url(#blade-glow)">
           <animate attributeName="opacity" values="0.4;0" dur="0.9s" repeatCount="1"/>
@@ -367,26 +372,17 @@ export async function GET(req: Request) {
     ` : ''}
   `;
 
-  // Background panes
-  const baseBg = `
-    <g mask="url(#round)">
-      <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
-      <rect x="${leftW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
-      <rect width="${totalW}" height="${height}" fill="url(#g)"/>
-    </g>
-  `;
-
-  const leftIcon = iconMarkup(icon);
-  const leftTextX = hasIcon ? 26 : 12;
-
   // Static frame?
   if (typeof staticIdx === 'number') {
+    const c = Q_CONCEPTS[staticIdx];
+    const title = `${c.emoji} ${c.title.toUpperCase()}`;
+    const eq = c.formula;
+
     const svgStatic = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
      aria-label="${esc(leftText)}: concept + XP ${xpStyle}">
   <title>${esc(leftText)} — concept rotator (static) with XP ${xpStyle}</title>
   <defs>${defs}</defs>
-
   ${baseBg}
   ${hasIcon ? leftIcon : ''}
 
@@ -394,13 +390,16 @@ export async function GET(req: Request) {
     <text x="${leftTextX}" y="22">${esc(leftText)}</text>
   </g>
 
-  <!-- Right content -->
   <g>
-    ${renderStaticRight(staticIdx)}
+    <text x="${leftW + pad}" y="16" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="12" font-weight="700" fill="#ffffff">${esc(title)}</text>
+    <text x="${leftW + pad}" y="28" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="10" fill="#c7d2fe" opacity="0.95">${esc(eq)}</text>
+    ${typeof streakDays === 'number' ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
+          font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(`🔥 ${streakDays}d`)}</text>` : ''}
     ${xpStyle === 'saber'
       ? saberGroup
       : `
-        <!-- fallback classic bar -->
         <rect x="${leftW}" y="${height - 3}" width="${rightW}" height="3" fill="#000000" opacity="0.22"/>
         <rect x="${leftW}" y="${height - 3}" width="${Math.round(rightW * (maxed ? 1 : prClamped))}" height="3"
               fill="${esc(saberColor)}" opacity="${maxed ? '1' : '0.95'}"/>
@@ -419,7 +418,9 @@ export async function GET(req: Request) {
   }
 
   // Animated groups
-  const groups = frames.map((g, i) => g.replace('</g>', `${animFor(i)}</g>`)).join('\n');
+  const groups = Q_CONCEPTS.map((_, i) =>
+    frames[i].replace('</g>', `${animFor(i)}</g>`)
+  ).join('\n');
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img"
@@ -448,8 +449,8 @@ export async function GET(req: Request) {
     `}
 
   <!-- Optional streak -->
-  ${streakText ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
-        font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(streakText)}</text>` : ''}
+  ${typeof streakDays === 'number' ? `<text x="${leftW + rightW - pad}" y="16" text-anchor="end"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif" font-size="11" fill="#e5e7eb" opacity="0.95">${esc(`🔥 ${streakDays}d`)}</text>` : ''}
 </svg>`.trim();
 
   return new Response(svg, {

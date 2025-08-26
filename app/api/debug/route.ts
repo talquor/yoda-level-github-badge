@@ -14,18 +14,17 @@ import {
 export const runtime = 'edge';
 
 /**
- * Inspect your day-by-day contribution counts (UTC) and the computed streak.
+ * Inspect your UTC-normalized per-day counts and the computed streak.
  *
  * Params:
  *   username (required)
- *   daysBack=120      : window size (30..400)
+ *   daysBack=180         : window size (30..400)
  *   anchor=today|lastActive (default lastActive)
- *   source=calendar|events|auto  (default auto; calendar preferred)
- *   includePrivate=1  : you must send your own token in Authorization for GH to include private
+ *   source=auto|calendar|events  (default auto; calendar preferred)
  *
  * Auth:
  *   Send:  Authorization: Bearer <YOUR_GH_TOKEN>
- *   Without a token, GitHub returns only public contributions.
+ *   Without a token, GitHub returns only PUBLIC contributions in calendar.
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -53,23 +52,28 @@ export async function GET(req: Request) {
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  // Try calendar first (unless source=events)
   let used: 'calendar' | 'events' = 'calendar';
   let dense: { date: string; count: number }[] = [];
   let rawDays: { date: string; count: number }[] = [];
+  let calendarError: string | undefined;
 
   try {
     if (source !== 'events') {
-      const weeks = await fetchContributionCalendar(username, token, daysBack);
-      if (weeks) {
-        rawDays = fromContributionCalendar(weeks);
-        const minYMD = toYMDUTC(new Date(Date.now() - daysBack * 86400000));
-        const maxYMD = toYMDUTC(new Date());
-        dense = normalizeDays(rawDays, minYMD, maxYMD);
-      } else if (source === 'calendar') {
-        // forced calendar but none available
-        throw new Error('Calendar unavailable from GitHub API');
-      } else {
+      try {
+        const weeks = await fetchContributionCalendar(username, token, daysBack);
+        if (weeks) {
+          rawDays = fromContributionCalendar(weeks);
+          const minYMD = toYMDUTC(new Date(Date.now() - daysBack * 86400000));
+          const maxYMD = toYMDUTC(new Date());
+          dense = normalizeDays(rawDays, minYMD, maxYMD);
+        } else {
+          calendarError = 'Calendar returned empty (unauthenticated? rate-limited? user has no public activity?)';
+          if (source === 'calendar') throw new Error(calendarError);
+          used = 'events';
+        }
+      } catch (err: any) {
+        calendarError = err?.message || 'Calendar fetch failed';
+        if (source === 'calendar') throw err;
         used = 'events';
       }
     } else {
@@ -79,7 +83,7 @@ export async function GET(req: Request) {
     if (used === 'events') {
       const events = await fetchEventsREST(username, token);
       rawDays = fromEvents(events || [], daysBack);
-      dense = rawDays; // fromEvents already normalized for the window
+      dense = rawDays;
     }
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message || 'GitHub fetch failed (calendar/events)' }), {
@@ -90,27 +94,23 @@ export async function GET(req: Request) {
 
   const utcToday = toYMDUTC(new Date());
   const streak = computeClassicStreak(dense, anchor);
-
-  // Also compute both anchors for clarity
   const streakToday = computeClassicStreak(dense, 'today');
   const streakLastActive = computeClassicStreak(dense, 'lastActive');
 
-  // Slice last ~30 days view for readability
-  const recent = dense.slice(-30);
-
   return new Response(JSON.stringify({
     username,
-    used,                          // 'calendar' (preferred) or 'events'
+    used,                          // 'calendar' or 'events'
+    calendarError,                 // helps explain fallback
     note:
-      'If you did not send your own token, private contributions are NOT included by GitHub.',
+      'Without your own token, private contributions are NOT included by GitHub.',
     anchorUsed: anchor,
     utcToday,
     streak,
     streak_today: streakToday,
     streak_lastActive: streakLastActive,
     daysBack,
-    recent30: recent,              // array of { date: 'YYYY-MM-DD (UTC)', count: number }
-    fullWindow: dense              // full normalized window (UTC)
+    recent30: dense.slice(-30),
+    fullWindow: dense
   }, null, 2), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   });

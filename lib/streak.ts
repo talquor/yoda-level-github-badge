@@ -89,7 +89,6 @@ export function computeClassicStreak(
   if (anchor === 'today') {
     idx = days.length - 1; // last item is today UTC due to normalizeDays()
   } else {
-    // find last active day
     idx = -1;
     for (let i = days.length - 1; i >= 0; i--) {
       if ((days[i].count ?? 0) > 0) { idx = i; break; }
@@ -108,7 +107,6 @@ export function computeClassicStreak(
 /**
  * "Momentum" streak example:
  * - counts a day if there is any activity in last 2 days rolling window
- *   (simple engagement metric)
  */
 export function computeMomentumStreak(days: DayCount[]): number {
   if (!days.length) return 0;
@@ -120,4 +118,17 @@ export function computeMomentumStreak(days: DayCount[]): number {
     else break;
   }
   return streak;
+}
+
+/** Merge two day arrays (same date domain) by max count per day (for hybrid). */
+export function mergeDaysMax(
+  a: { date: string; count: number }[],
+  b: { date: string; count: number }[]
+): { date: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const d of a) map.set(d.date, Math.max(map.get(d.date) ?? 0, d.count ?? 0));
+  for (const d of b) map.set(d.date, Math.max(map.get(d.date) ?? 0, d.count ?? 0));
+  const out = Array.from(map, ([date, count]) => ({ date, count }));
+  out.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+  return out;
 }
