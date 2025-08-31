@@ -1,160 +1,248 @@
 // app/api/duel/route.ts
 import {
-  fetchReposREST,
-  fetchEventsREST,
-  fetchUserREST,
   fetchUserMetricsGraphQL,
+  fetchUserREST,
+  fetchReposREST,
 } from '@/lib/github';
-import {
-  scoreFromGraphQL,
-  scoreFromREST,
-  applyLegendOverride,
-} from '@/lib/score';
-import { tierWithBand } from '@/lib/rank';
-import { buildBadgeSVG } from '@/lib/badge';
+import { scoreFromGraphQL, scoreFromREST, applyLegendOverride } from '@/lib/score';
+import { tierWithBand, textWidth } from '@/lib/rank';
+import { themeColors, type Theme } from '@/lib/theme';
 
 export const runtime = 'edge';
 
-type XPParam = 'dots' | 'bar' | 'none';
+type Icon = 'github' | 'saber' | 'galaxy' | 'none';
 
-async function scoreUser(username: string, token?: string) {
-  let points = 0;
-  let method: 'rest' | 'graphql' = 'rest';
-  let stars = 0;
-  let followers = 0;
+const GH_LOGO_PATH =
+  'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38' +
+  ' 0-.19-.01-.82-.01-1.49C3.73 14.91 3.27 13.73 3.27 13.73c-.36-.91-.88-1.15-.88-1.15' +
+  ' -.72-.49.05-.48.05-.48.79.06 1.2.81 1.2.81.71 1.21 1.87.86 2.33.66.07-.52.28-.86.5-1.06' +
+  ' -2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.17 0 0 1.01-.32' +
+  ' 3.3 1.23.96-.27 1.98-.4 3-.41 1.02.01 2.04.14 3 .41 2.28-1.55 3.29-1.23 3.29-1.23.66 1.65.24 2.87.12 3.17' +
+  ' .77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2' +
+  ' 0 .21.15.46.55.38C13.71 14.53 16 11.54 16 8c0-4.42-3.58-8-8-8z';
 
-  try {
-    const gql = await fetchUserMetricsGraphQL(username, token);
-    if (gql) {
-      points = scoreFromGraphQL(gql);
-      method = 'graphql';
-      stars = gql.totalStars;
-      followers = gql.followers;
-    } else {
-      const [u, repos, events] = await Promise.all([
-        fetchUserREST(username, token),
-        fetchReposREST(username, token),
-        fetchEventsREST(username, token),
-      ]);
+const SABER_ICON = `
+  <g transform="translate(8,5)">
+    <rect x="0" y="6" width="8" height="6" rx="1.5" fill="#e5e7eb"/>
+    <rect x="1" y="7" width="6" height="4" rx="1" fill="#9ca3af"/>
+    <rect x="2" y="8" width="4" height="2" rx="1" fill="#4b5563"/>
+    <rect x="8" y="7" width="2" height="4" rx="1" fill="#94a3b8"/>
+    <rect x="10" y="6" width="6" height="6" rx="1.5" fill="#bbf7d0"/>
+    <rect x="10" y="7" width="6" height="4" rx="1.2" fill="#34d399"/>
+  </g>
+`;
+const GALAXY_ICON = `
+  <g transform="translate(8,6)">
+    <circle cx="6" cy="6" r="5.5" fill="none" stroke="#e5e7eb" stroke-width="1.5"/>
+    <path d="M6 0 L6 12 M0 6 L12 6 M2.2 2.2 L9.8 9.8 M2.2 9.8 L9.8 2.2"
+          stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round"/>
+    <circle cx="6" cy="6" r="1.8" fill="#a7f3d0"/>
+  </g>
+`;
 
-      points = scoreFromREST({
-        followers: u.followers ?? 0,
-        publicRepos: u.public_repos ?? 0,
-        createdAt: u.created_at ?? new Date().toISOString(),
-        repos: (repos ?? []).map((r: any) => ({
-          stargazers_count: r.stargazers_count ?? 0,
-          forks_count: r.forks_count ?? 0,
-          language: r.language ?? null,
-          pushed_at: r.pushed_at ?? null,
-          updated_at: r.updated_at ?? null,
-        })),
-        events: (events ?? []).map((e: any) => ({
-          type: e.type,
-          created_at: e.created_at,
-        })),
-      });
+const esc = (s: string) =>
+  (s || '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
 
-      stars = (repos ?? []).reduce(
-        (s: number, r: any) => s + (r?.stargazers_count || 0),
-        0
-      );
-      followers = u.followers ?? 0;
-    }
-  } catch {
-    // swallow errors → keep defaults (points = 0)
+function iconMarkup(icon: Icon) {
+  if (icon === 'none') return '';
+  if (icon === 'github') return `<g transform="translate(8,6)"><path fill="#fff" d="${GH_LOGO_PATH}"/></g>`;
+  if (icon === 'saber') return SABER_ICON;
+  return GALAXY_ICON;
+}
+
+async function computePoints(username: string, token?: string) {
+  const gql = await fetchUserMetricsGraphQL(username, token);
+  if (gql) {
+    const points = scoreFromGraphQL(gql);
+    return {
+      method: 'graphql',
+      points,
+      approxStars: gql.totalStars,
+      approxFollowers: gql.followers
+    };
   }
+  const [u, repos, events] = await Promise.all([
+    fetchUserREST(username, token),
+    fetchReposREST(username, token),
+    Promise.resolve([]) // events not needed for base score here
+  ]);
 
-  points = applyLegendOverride(username, points, stars, followers);
-  const band = tierWithBand(points);
-  return { username, points, band, method };
+  const points = scoreFromREST({
+    followers: u.followers ?? 0,
+    publicRepos: u.public_repos ?? 0,
+    createdAt: u.created_at ?? new Date().toISOString(),
+    repos: (repos ?? []).map((r: any) => ({
+      stargazers_count: r.stargazers_count ?? 0,
+      forks_count: r.forks_count ?? 0,
+      language: r.language ?? null,
+      pushed_at: r.pushed_at ?? null,
+      updated_at: r.updated_at ?? null,
+    })),
+    events
+  });
+
+  const approxStars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
+  const approxFollowers = u.followers ?? 0;
+
+  return { method: 'rest', points, approxStars, approxFollowers };
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const u1 = searchParams.get('u1');
-  const u2 = searchParams.get('u2');
-  const theme = (searchParams.get('theme') ?? 'jedi') as 'jedi' | 'sith';
-  const logo = (searchParams.get('logo') ?? 'galaxy') as 'github' | 'saber' | 'galaxy';
-  const xp = (searchParams.get('xp') ?? 'bar') as XPParam; // 'dots' | 'bar' | 'none'
-  const label = searchParams.get('label') ?? 'Rank Duel';
-
-  if (!u1 || !u2) {
-    return new Response(JSON.stringify({ error: 'Missing ?u1=&u2=' }), {
+  const user1 = searchParams.get('user1');
+  const user2 = searchParams.get('user2');
+  if (!user1 || !user2) {
+    return new Response(JSON.stringify({ error: 'Missing ?user1=&user2=' }), {
       status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Vary': 'Authorization, Accept-Encoding'
-      },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 
-  // Token: Authorization header > env
+  const badge = searchParams.get('badge') !== '0'; // default: badge svg
+  const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
+  const icon1 = (searchParams.get('icon1') ?? 'saber') as Icon;
+  const icon2 = (searchParams.get('icon2') ?? 'galaxy') as Icon;
+
+  // Token from Authorization or env
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   let headerToken: string | undefined;
   {
     const parts = authHeader.split(/\s+/);
     if (parts.length >= 2) {
       const scheme = parts[0].toLowerCase();
-      if (scheme === 'bearer' || scheme === 'token') {
-        headerToken = parts[1]?.trim();
-      }
+      if (scheme === 'bearer' || scheme === 'token') headerToken = parts[1]?.trim();
     }
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  const [A, B] = await Promise.all([scoreUser(u1, token), scoreUser(u2, token)]);
+  let a, b;
+  try {
+    const [pa, pb] = await Promise.all([
+      computePoints(user1, token),
+      computePoints(user2, token),
+    ]);
 
-  // Winner (or tie)
-  const winner = A.points === B.points ? null : A.points > B.points ? A : B;
+    // Legends / overrides
+    pa.points = applyLegendOverride(user1, pa.points, pa.approxStars, pa.approxFollowers);
+    pb.points = applyLegendOverride(user2, pb.points, pb.approxStars, pb.approxFollowers);
 
-  // Build two badges (SVG fragments)
-  const make = (x: typeof A) => {
-    const rightText = `${x.band.tier.name} (${x.band.tier.grade}) • ${x.band.bandRoman} • ${x.points.toFixed(1)} pts`;
-    const progressRatio = xp === 'none' ? undefined : (x.band.pctToNext ?? 0) / 100;
-    const progressVariant = xp === 'none' ? undefined : (xp as 'dots' | 'bar');
-
-    const { svg, width, height } = buildBadgeSVG({
-      label: x.username,
-      rightText,
-      rightColor: x.band.tier.color,
-      icon: logo,
-      progressRatio,
-      progressVariant,
-      theme,
-      decorateMaxed: x.band.tier.grade === 'S++' || x.points >= 98
+    a = { user: user1, ...pa, ...tierWithBand(pa.points) };
+    b = { user: user2, ...pb, ...tierWithBand(pb.points) };
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e?.message || 'Failed to compute duel' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
-    return { svg, width, height };
+  }
+
+  // JSON mode
+  if (!badge) {
+    return new Response(JSON.stringify({
+      a: {
+        user: a.user,
+        points: a.points,
+        rank: a.tier.grade,
+        persona: a.tier.name,
+        band: a.bandRoman,
+        color: a.tier.color,
+      },
+      b: {
+        user: b.user,
+        points: b.points,
+        rank: b.tier.grade,
+        persona: b.tier.name,
+        band: b.bandRoman,
+        color: b.tier.color,
+      },
+      winner: a.points === b.points ? 'tie' : (a.points > b.points ? a.user : b.user)
+    }, null, 2), {
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    });
+  }
+
+  // SVG badge
+  const tc = themeColors(theme);
+  const pad = 14;
+  const height = 40;
+  const labelLeft  = `${a.user.toUpperCase()} • ${a.tier.grade}`;
+  const labelRight = `${b.tier.grade} • ${b.user.toUpperCase()}`;
+  const leftW  = pad * 2 + (icon1 === 'none' ? 0 : 18) + textWidth(labelLeft, 'bold');
+  const rightW = pad * 2 + (icon2 === 'none' ? 0 : 18) + textWidth(labelRight, 'bold');
+  const sepW   = 48; // center VS area
+  const totalW = leftW + sepW + rightW;
+
+  const prA = Math.max(0, Math.min(1, (a.pctToNext ?? 0) / 100));
+  const prB = Math.max(0, Math.min(1, (b.pctToNext ?? 0) / 100));
+  const maxedA = (a.pctToNext ?? 0) <= 0;
+  const maxedB = (b.pctToNext ?? 0) <= 0;
+
+  const iconSvg1 = iconMarkup(icon1);
+  const iconSvg2 = iconMarkup(icon2);
+
+  const escLabelLeft  = esc(labelLeft);
+  const escLabelRight = esc(labelRight);
+
+  const saberBar = (x: number, w: number, pr: number, color: string, maxed: boolean) => {
+    const core = Math.round((w - pad * 2) * (maxed ? 1 : pr));
+    return `
+      <rect x="${x + pad}" y="${height - 6}" width="${w - pad * 2}" height="3" rx="1.5" fill="#000000" opacity="0.25"/>
+      <rect x="${x + pad}" y="${height - 6}" width="${core}" height="3" rx="1.5" fill="${esc(color)}" opacity="${maxed? '1' : '0.95'}"/>
+    `;
   };
 
-  const aSVG = make(A);
-  const bSVG = make(B);
-
-  const gap = 18;
-  const w = Math.max(aSVG.width, bSVG.width);
-  const h = aSVG.height + bSVG.height + gap + 34;
-
-  const title = winner ? `Winner: ${winner.username}` : 'It’s a tie!';
-  const doc = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img" aria-label="${esc(label)}: ${esc(title)}">
-  <title>${esc(label)}: ${esc(title)}</title>
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="Duel: ${esc(a.user)} vs ${esc(b.user)}">
+  <title>Duel • ${esc(a.user)} vs ${esc(b.user)}</title>
   <defs>
-    <linearGradient id="sep" x2="0" y2="100%">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.0"/>
-      <stop offset="1" stop-opacity="0.12"/>
+    <linearGradient id="g" x2="0" y2="100%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
     </linearGradient>
+    <mask id="round">
+      <rect width="${totalW}" height="${height}" rx="4" fill="#fff"/>
+    </mask>
   </defs>
-  <g>
-    <text x="0" y="16" fill="#e5e7eb" font-size="14" font-weight="700" font-family="Verdana, DejaVu Sans, Geneva, sans-serif">${esc(
-      label.toUpperCase()
-    )} — ${esc(title)}</text>
-    <rect x="0" y="20" width="${w}" height="2" fill="url(#sep)"/>
-    <g transform="translate(0,26)">${aSVG.svg}</g>
-    <g transform="translate(0,${26 + aSVG.height + gap})">${bSVG.svg}</g>
+
+  <g mask="url(#round)">
+    <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
+    <rect x="${leftW}" width="${sepW}" height="${height}" fill="#0b1020"/>
+    <rect x="${leftW + sepW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
+    <rect width="${totalW}" height="${height}" fill="url(#g)"/>
   </g>
+
+  <!-- Left user -->
+  ${icon1 === 'none' ? '' : `<g transform="translate(${8},6)">${iconSvg1}</g>`}
+  <text x="${(icon1 === 'none' ? 10 : 28)}" y="16"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="12" font-weight="700" fill="#ffffff">${escLabelLeft}</text>
+  <text x="${(icon1 === 'none' ? 10 : 28)}" y="29"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="10" fill="${esc(a.tier.color)}" opacity="0.95">${esc(`${a.tier.name} • ${a.bandRoman}`)}</text>
+  ${saberBar(0, leftW, prA, a.tier.color, maxedA)}
+
+  <!-- VS -->
+  <g transform="translate(${leftW},0)">
+    <text x="${sepW/2}" y="24" text-anchor="middle"
+          font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="14" font-weight="700" fill="#e5e7eb">VS</text>
+  </g>
+
+  <!-- Right user -->
+  ${icon2 === 'none' ? '' : `<g transform="translate(${leftW + sepW + 8},6)">${iconSvg2}</g>`}
+  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="16"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="12" font-weight="700" fill="#ffffff">${escLabelRight}</text>
+  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="29"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="10" fill="${esc(b.tier.color)}" opacity="0.95">${esc(`${b.bandRoman} • ${b.tier.name}`)}</text>
+  ${saberBar(leftW + sepW, rightW, prB, b.tier.color, maxedB)}
 </svg>`.trim();
 
-  return new Response(doc, {
+  return new Response(svg, {
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=600, must-revalidate',
@@ -162,11 +250,4 @@ export async function GET(req: Request) {
       'Vary': 'Authorization, Accept-Encoding'
     }
   });
-}
-
-function esc(s: string) {
-  return (s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
