@@ -22,7 +22,7 @@ const GH_LOGO_PATH =
   ' 0 .21.15.46.55.38C13.71 14.53 16 11.54 16 8c0-4.42-3.58-8-8-8z';
 
 const SABER_ICON = `
-  <g transform="translate(8,5)">
+  <g transform="translate(0,0)">
     <rect x="0" y="6" width="8" height="6" rx="1.5" fill="#e5e7eb"/>
     <rect x="1" y="7" width="6" height="4" rx="1" fill="#9ca3af"/>
     <rect x="2" y="8" width="4" height="2" rx="1" fill="#4b5563"/>
@@ -32,7 +32,7 @@ const SABER_ICON = `
   </g>
 `;
 const GALAXY_ICON = `
-  <g transform="translate(8,6)">
+  <g transform="translate(0,0)">
     <circle cx="6" cy="6" r="5.5" fill="none" stroke="#e5e7eb" stroke-width="1.5"/>
     <path d="M6 0 L6 12 M0 6 L12 6 M2.2 2.2 L9.8 9.8 M2.2 9.8 L9.8 2.2"
           stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round"/>
@@ -49,9 +49,25 @@ const esc = (s: string) =>
 
 function iconMarkup(icon: Icon) {
   if (icon === 'none') return '';
-  if (icon === 'github') return `<g transform="translate(0,0)"><path fill="#fff" d="${GH_LOGO_PATH}"/></g>`;
+  if (icon === 'github') return `<path fill="#fff" d="${GH_LOGO_PATH}"/>`;
   if (icon === 'saber') return SABER_ICON;
   return GALAXY_ICON;
+}
+
+// Measure + fit helpers
+function fitTextToWidth(s: string, max: number, bold = false): { text: string; width: number } {
+  if (!s) return { text: '', width: 0 };
+  let w = textWidth(s, bold ? 'bold' : 'normal');
+  if (w <= max) return { text: s, width: w };
+  // Ellipsize
+  let cut = s.length;
+  while (cut > 1) {
+    const t = s.slice(0, cut) + '…';
+    w = textWidth(t, bold ? 'bold' : 'normal');
+    if (w <= max) return { text: t, width: w };
+    cut--;
+  }
+  return { text: '…', width: textWidth('…', bold ? 'bold' : 'normal') };
 }
 
 async function computePoints(username: string, token?: string) {
@@ -98,10 +114,20 @@ export async function GET(req: Request) {
     });
   }
 
-  const badge = searchParams.get('badge') !== '0'; // default: SVG
+  // Options
+  const badge = searchParams.get('badge') !== '0'; // default svg
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
   const icon1 = (searchParams.get('icon1') ?? 'saber') as Icon;
   const icon2 = (searchParams.get('icon2') ?? 'galaxy') as Icon;
+
+  // Layout caps (prevent overflow while keeping readability)
+  const PAD = 14;
+  const HEIGHT = 56;                      // Taller for breathing room
+  const SEP_W = 64;                       // VS area
+  const ICON_W = (i: Icon) => (i === 'none' ? 0 : 18);
+  const MAX_TOTAL = 720;                  // hard cap overall
+  const MIN_SIDE = 210;                   // min width per side
+  const MAX_SIDE = 300;                   // max width per side before ellipsis
 
   // Token (Authorization > env)
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
@@ -115,13 +141,12 @@ export async function GET(req: Request) {
   }
   const token = headerToken || process.env.GITHUB_TOKEN;
 
-  let a, b;
+  // Compute points/tiers
+  let a: any, b: any;
   try {
     const [pa, pb] = await Promise.all([computePoints(user1, token), computePoints(user2, token)]);
-    // Legends override (e.g., Torvalds)
     pa.points = applyLegendOverride(user1, pa.points, pa.approxStars, pa.approxFollowers);
     pb.points = applyLegendOverride(user2, pb.points, pb.approxStars, pb.approxFollowers);
-
     a = { user: user1, ...pa, ...tierWithBand(pa.points) };
     b = { user: user2, ...pb, ...tierWithBand(pb.points) };
   } catch (e: any) {
@@ -131,81 +156,171 @@ export async function GET(req: Request) {
     });
   }
 
+  const winner =
+    a.points === b.points ? 'tie' : (a.points > b.points ? 'left' : 'right');
+
   if (!badge) {
     return new Response(JSON.stringify({
       a: { user: a.user, rank: a.tier.grade, persona: a.tier.name, band: a.bandRoman, points: a.points },
       b: { user: b.user, rank: b.tier.grade, persona: b.tier.name, band: b.bandRoman, points: b.points },
-      winner: a.points === b.points ? 'tie' : (a.points > b.points ? a.user : b.user)
+      winner
     }, null, 2), {
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}
     });
   }
 
-  // ---- SVG badge ----
-  const tc = themeColors(theme);
-  const pad = 14;
-  const height = 44;
+  // Compose labels (2 lines per side)
+  const topL  = `${a.user.toUpperCase()}`;
+  const botL  = `${a.tier.grade} • ${a.tier.name}`;
+  const topR  = `${b.user.toUpperCase()}`;
+  const botR  = `${b.tier.grade} • ${b.tier.name}`;
 
-  const leftText  = `${a.user.toUpperCase()} • ${a.tier.grade}`;
-  const rightText = `${b.tier.grade} • ${b.user.toUpperCase()}`;
-  const leftW  = pad * 2 + (icon1 === 'none' ? 0 : 18) + textWidth(leftText, 'bold');
-  const rightW = pad * 2 + (icon2 === 'none' ? 0 : 18) + textWidth(rightText, 'bold');
-  const sepW   = 52;
-  const totalW = leftW + sepW + rightW;
+  // Fit to per-side max text widths
+  const iconSpaceL = ICON_W(icon1) ? 20 : 0;
+  const iconSpaceR = ICON_W(icon2) ? 20 : 0;
 
+  // Max text area per side (cap)
+  const MAX_TEXT_L = MAX_SIDE - PAD * 2 - iconSpaceL;
+  const MAX_TEXT_R = MAX_SIDE - PAD * 2 - iconSpaceR;
+
+  const fitTopL = fitTextToWidth(topL, MAX_TEXT_L, true);
+  const fitBotL = fitTextToWidth(botL, MAX_TEXT_L, false);
+  const fitTopR = fitTextToWidth(topR, MAX_TEXT_R, true);
+  const fitBotR = fitTextToWidth(botR, MAX_TEXT_R, false);
+
+  const sideW_L = Math.max(
+    MIN_SIDE,
+    Math.min(
+      MAX_SIDE,
+      PAD * 2 + iconSpaceL + Math.max(fitTopL.width, fitBotL.width)
+    )
+  );
+  const sideW_R = Math.max(
+    MIN_SIDE,
+    Math.min(
+      MAX_SIDE,
+      PAD * 2 + iconSpaceR + Math.max(fitTopR.width, fitBotR.width)
+    )
+  );
+
+  let totalW = sideW_L + SEP_W + sideW_R;
+  // If still too wide, squeeze proportionally by re-fitting
+  if (totalW > MAX_TOTAL) {
+    const squeeze = (totalW - MAX_TOTAL) / 2; // reduce both sides
+    const targetL = Math.max(MIN_SIDE, sideW_L - squeeze);
+    const targetR = Math.max(MIN_SIDE, sideW_R - squeeze);
+
+    const maxTextL2 = Math.max(20, targetL - PAD * 2 - iconSpaceL);
+    const maxTextR2 = Math.max(20, targetR - PAD * 2 - iconSpaceR);
+
+    const fitTopL2 = fitTextToWidth(topL, maxTextL2, true);
+    const fitBotL2 = fitTextToWidth(botL, maxTextL2, false);
+    const fitTopR2 = fitTextToWidth(topR, maxTextR2, true);
+    const fitBotR2 = fitTextToWidth(botR, maxTextR2, false);
+
+    var _sideW_L = Math.max(MIN_SIDE, PAD * 2 + iconSpaceL + Math.max(fitTopL2.width, fitBotL2.width));
+    var _sideW_R = Math.max(MIN_SIDE, PAD * 2 + iconSpaceR + Math.max(fitTopR2.width, fitBotR2.width));
+    totalW = _sideW_L + SEP_W + _sideW_R;
+
+    // Apply re-fit versions
+    (fitTopL.text as any) = fitTopL2.text; (fitTopL.width as any) = fitTopL2.width;
+    (fitBotL.text as any) = fitBotL2.text; (fitBotL.width as any) = fitBotL2.width;
+    (fitTopR.text as any) = fitTopR2.text; (fitTopR.width as any) = fitTopR2.width;
+    (fitBotR.text as any) = fitBotR2.text; (fitBotR.width as any) = fitBotR2.width;
+  }
+
+  // Progress
   const prA = Math.max(0, Math.min(1, (a.pctToNext ?? 0) / 100));
   const prB = Math.max(0, Math.min(1, (b.pctToNext ?? 0) / 100));
   const maxedA = (a.pctToNext ?? 0) <= 0;
   const maxedB = (b.pctToNext ?? 0) <= 0;
 
+  // Theme colors
+  const tc = themeColors(theme);
+  const leftColor = tc.leftColor;
+  const rightShade = '#111827';
+
+  // Winner ribbon
+  const ribbonText = winner === 'tie' ? 'TIE' : 'WINNER';
+  const ribbonFill = winner === 'tie' ? '#374151' : (winner === 'left' ? a.tier.color : b.tier.color);
+
   const saberBar = (x: number, w: number, pr: number, color: string, maxed: boolean) => {
-    const core = Math.round((w - pad * 2) * (maxed ? 1 : pr));
+    const core = Math.round((w - PAD * 2) * (maxed ? 1 : pr));
     return `
-      <rect x="${x + pad}" y="${height - 7}" width="${w - pad * 2}" height="4" rx="2" fill="#000000" opacity="0.28"/>
-      <rect x="${x + pad}" y="${height - 7}" width="${core}" height="4" rx="2" fill="${esc(color)}" opacity="${maxed? '1' : '0.95'}"/>
+      <rect x="${x + PAD}" y="${HEIGHT - 9}" width="${w - PAD * 2}" height="5" rx="2.5" fill="#000000" opacity="0.28"/>
+      <rect x="${x + PAD}" y="${HEIGHT - 9}" width="${core}" height="5" rx="2.5" fill="${esc(color)}" opacity="${maxed? '1' : '0.95'}"/>
     `;
   };
 
+  const glowLeft = winner === 'left' ? `
+    <rect x="0" y="0" width="${sideW_L}" height="${HEIGHT}" fill="${esc(a.tier.color)}" opacity="0.07"/>
+  ` : '';
+  const glowRight = winner === 'right' ? `
+    <rect x="${sideW_L + SEP_W}" y="0" width="${sideW_R}" height="${HEIGHT}" fill="${esc(b.tier.color)}" opacity="0.07"/>
+  ` : '';
+
+  const iconL = iconMarkup(icon1);
+  const iconR = iconMarkup(icon2);
+
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${height}" role="img" aria-label="Duel: ${esc(a.user)} vs ${esc(b.user)}">
-  <title>Duel • ${esc(a.user)} vs ${esc(b.user)}</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${HEIGHT}" role="img"
+     aria-label="Duel: ${esc(a.user)} vs ${esc(b.user)} — ${ribbonText}">
+  <title>Duel • ${esc(a.user)} vs ${esc(b.user)} — ${ribbonText}</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
       <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
     </linearGradient>
-    <mask id="round"><rect width="${totalW}" height="${height}" rx="6" fill="#fff"/></mask>
+    <mask id="round"><rect width="${totalW}" height="${HEIGHT}" rx="8" fill="#fff"/></mask>
   </defs>
 
   <g mask="url(#round)">
-    <rect width="${leftW}" height="${height}" fill="${esc(tc.leftColor)}"/>
-    <rect x="${leftW}" width="${sepW}" height="${height}" fill="#0b1020"/>
-    <rect x="${leftW + sepW}" width="${rightW}" height="${height}" fill="#111827" opacity="0.18"/>
-    <rect width="${totalW}" height="${height}" fill="url(#g)"/>
+    <rect width="${sideW_L}" height="${HEIGHT}" fill="${esc(leftColor)}"/>
+    <rect x="${sideW_L}" width="${SEP_W}" height="${HEIGHT}" fill="#0b1020"/>
+    <rect x="${sideW_L + SEP_W}" width="${sideW_R}" height="${HEIGHT}" fill="${rightShade}" opacity="0.18"/>
+    ${glowLeft}
+    ${glowRight}
+    <rect width="${totalW}" height="${HEIGHT}" fill="url(#g)"/>
   </g>
 
-  <!-- Left -->
-  ${icon1 === 'none' ? '' : `<g transform="translate(8,6)">${iconMarkup(icon1)}</g>`}
-  <text x="${(icon1 === 'none' ? 10 : 28)}" y="17" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="12" font-weight="700" fill="#ffffff">${esc(leftText)}</text>
-  <text x="${(icon1 === 'none' ? 10 : 28)}" y="31" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="10" fill="${esc(a.tier.color)}" opacity="0.95">${esc(`${a.tier.name} • ${a.bandRoman}`)}</text>
-  ${saberBar(0, leftW, prA, a.tier.color, maxedA)}
-
-  <!-- VS -->
-  <g transform="translate(${leftW},0)">
-    <text x="${sepW/2}" y="26" text-anchor="middle"
+  <!-- Winner ribbon -->
+  <g transform="translate(${sideW_L},0)">
+    <rect x="${(SEP_W/2) - 30}" y="6" width="60" height="14" rx="7" fill="${esc(ribbonFill)}" opacity="0.95"/>
+    <text x="${SEP_W/2}" y="17" text-anchor="middle"
+          font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+          font-size="10" font-weight="700" fill="#ffffff">${ribbonText}</text>
+    <text x="${SEP_W/2}" y="34" text-anchor="middle"
           font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
           font-size="14" font-weight="700" fill="#e5e7eb">VS</text>
   </g>
 
+  <!-- Left -->
+  ${icon1 === 'none' ? '' : `<g transform="translate(${8},6)">${iconL}</g>`}
+  <text x="${(icon1 === 'none' ? PAD : PAD + 20)}" y="20"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="13" font-weight="700" fill="#ffffff">${esc(fitTopL.text)}</text>
+  <text x="${(icon1 === 'none' ? PAD : PAD + 20)}" y="36"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="11" fill="${esc(a.tier.color)}" opacity="0.95">${esc(fitBotL.text)}</text>
+  ${saberBar(0, sideW_L, prA, a.tier.color, maxedA)}
+  ${winner === 'left' ? `
+    <text x="${sideW_L - 16}" y="16" text-anchor="end"
+          font-family="Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji"
+          font-size="14">👑</text>` : ''}
+
   <!-- Right -->
-  ${icon2 === 'none' ? '' : `<g transform="translate(${leftW + sepW + 8},6)">${iconMarkup(icon2)}</g>`}
-  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="17" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="12" font-weight="700" fill="#ffffff">${esc(rightText)}</text>
-  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="31" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="10" fill="${esc(b.tier.color)}" opacity="0.95">${esc(`${b.bandRoman} • ${b.tier.name}`)}</text>
-  ${saberBar(leftW + sepW, rightW, prB, b.tier.color, maxedB)}
+  ${icon2 === 'none' ? '' : `<g transform="translate(${sideW_L + SEP_W + 8},6)">${iconR}</g>`}
+  <text x="${sideW_L + SEP_W + (icon2 === 'none' ? PAD : PAD + 20)}" y="20"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="13" font-weight="700" fill="#ffffff">${esc(fitTopR.text)}</text>
+  <text x="${sideW_L + SEP_W + (icon2 === 'none' ? PAD : PAD + 20)}" y="36"
+        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="11" fill="${esc(b.tier.color)}" opacity="0.95">${esc(fitBotR.text)}</text>
+  ${saberBar(sideW_L + SEP_W, sideW_R, prB, b.tier.color, maxedB)}
+  ${winner === 'right' ? `
+    <text x="${totalW - 8}" y="16" text-anchor="end"
+          font-family="Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji"
+          font-size="14">👑</text>` : ''}
 </svg>`.trim();
 
   return new Response(svg, {
