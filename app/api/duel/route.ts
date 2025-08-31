@@ -49,7 +49,7 @@ const esc = (s: string) =>
 
 function iconMarkup(icon: Icon) {
   if (icon === 'none') return '';
-  if (icon === 'github') return `<g transform="translate(8,6)"><path fill="#fff" d="${GH_LOGO_PATH}"/></g>`;
+  if (icon === 'github') return `<g transform="translate(0,0)"><path fill="#fff" d="${GH_LOGO_PATH}"/></g>`;
   if (icon === 'saber') return SABER_ICON;
   return GALAXY_ICON;
 }
@@ -57,20 +57,17 @@ function iconMarkup(icon: Icon) {
 async function computePoints(username: string, token?: string) {
   const gql = await fetchUserMetricsGraphQL(username, token);
   if (gql) {
-    const points = scoreFromGraphQL(gql);
     return {
-      method: 'graphql',
-      points,
+      method: 'graphql' as const,
+      points: scoreFromGraphQL(gql),
       approxStars: gql.totalStars,
       approxFollowers: gql.followers
     };
   }
-  const [u, repos, events] = await Promise.all([
+  const [u, repos] = await Promise.all([
     fetchUserREST(username, token),
-    fetchReposREST(username, token),
-    Promise.resolve([]) // events not needed for base score here
+    fetchReposREST(username, token)
   ]);
-
   const points = scoreFromREST({
     followers: u.followers ?? 0,
     publicRepos: u.public_repos ?? 0,
@@ -82,19 +79,18 @@ async function computePoints(username: string, token?: string) {
       pushed_at: r.pushed_at ?? null,
       updated_at: r.updated_at ?? null,
     })),
-    events
+    events: []
   });
-
   const approxStars = (repos ?? []).reduce((s: number, r: any) => s + (r?.stargazers_count || 0), 0);
   const approxFollowers = u.followers ?? 0;
-
-  return { method: 'rest', points, approxStars, approxFollowers };
+  return { method: 'rest' as const, points, approxStars, approxFollowers };
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const user1 = searchParams.get('user1');
   const user2 = searchParams.get('user2');
+
   if (!user1 || !user2) {
     return new Response(JSON.stringify({ error: 'Missing ?user1=&user2=' }), {
       status: 400,
@@ -102,12 +98,12 @@ export async function GET(req: Request) {
     });
   }
 
-  const badge = searchParams.get('badge') !== '0'; // default: badge svg
+  const badge = searchParams.get('badge') !== '0'; // default: SVG
   const theme = (searchParams.get('theme') ?? 'jedi') as Theme;
   const icon1 = (searchParams.get('icon1') ?? 'saber') as Icon;
   const icon2 = (searchParams.get('icon2') ?? 'galaxy') as Icon;
 
-  // Token from Authorization or env
+  // Token (Authorization > env)
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   let headerToken: string | undefined;
   {
@@ -121,12 +117,8 @@ export async function GET(req: Request) {
 
   let a, b;
   try {
-    const [pa, pb] = await Promise.all([
-      computePoints(user1, token),
-      computePoints(user2, token),
-    ]);
-
-    // Legends / overrides
+    const [pa, pb] = await Promise.all([computePoints(user1, token), computePoints(user2, token)]);
+    // Legends override (e.g., Torvalds)
     pa.points = applyLegendOverride(user1, pa.points, pa.approxStars, pa.approxFollowers);
     pb.points = applyLegendOverride(user2, pb.points, pb.approxStars, pb.approxFollowers);
 
@@ -139,40 +131,26 @@ export async function GET(req: Request) {
     });
   }
 
-  // JSON mode
   if (!badge) {
     return new Response(JSON.stringify({
-      a: {
-        user: a.user,
-        points: a.points,
-        rank: a.tier.grade,
-        persona: a.tier.name,
-        band: a.bandRoman,
-        color: a.tier.color,
-      },
-      b: {
-        user: b.user,
-        points: b.points,
-        rank: b.tier.grade,
-        persona: b.tier.name,
-        band: b.bandRoman,
-        color: b.tier.color,
-      },
+      a: { user: a.user, rank: a.tier.grade, persona: a.tier.name, band: a.bandRoman, points: a.points },
+      b: { user: b.user, rank: b.tier.grade, persona: b.tier.name, band: b.bandRoman, points: b.points },
       winner: a.points === b.points ? 'tie' : (a.points > b.points ? a.user : b.user)
     }, null, 2), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 
-  // SVG badge
+  // ---- SVG badge ----
   const tc = themeColors(theme);
   const pad = 14;
-  const height = 40;
-  const labelLeft  = `${a.user.toUpperCase()} • ${a.tier.grade}`;
-  const labelRight = `${b.tier.grade} • ${b.user.toUpperCase()}`;
-  const leftW  = pad * 2 + (icon1 === 'none' ? 0 : 18) + textWidth(labelLeft, 'bold');
-  const rightW = pad * 2 + (icon2 === 'none' ? 0 : 18) + textWidth(labelRight, 'bold');
-  const sepW   = 48; // center VS area
+  const height = 44;
+
+  const leftText  = `${a.user.toUpperCase()} • ${a.tier.grade}`;
+  const rightText = `${b.tier.grade} • ${b.user.toUpperCase()}`;
+  const leftW  = pad * 2 + (icon1 === 'none' ? 0 : 18) + textWidth(leftText, 'bold');
+  const rightW = pad * 2 + (icon2 === 'none' ? 0 : 18) + textWidth(rightText, 'bold');
+  const sepW   = 52;
   const totalW = leftW + sepW + rightW;
 
   const prA = Math.max(0, Math.min(1, (a.pctToNext ?? 0) / 100));
@@ -180,17 +158,11 @@ export async function GET(req: Request) {
   const maxedA = (a.pctToNext ?? 0) <= 0;
   const maxedB = (b.pctToNext ?? 0) <= 0;
 
-  const iconSvg1 = iconMarkup(icon1);
-  const iconSvg2 = iconMarkup(icon2);
-
-  const escLabelLeft  = esc(labelLeft);
-  const escLabelRight = esc(labelRight);
-
   const saberBar = (x: number, w: number, pr: number, color: string, maxed: boolean) => {
     const core = Math.round((w - pad * 2) * (maxed ? 1 : pr));
     return `
-      <rect x="${x + pad}" y="${height - 6}" width="${w - pad * 2}" height="3" rx="1.5" fill="#000000" opacity="0.25"/>
-      <rect x="${x + pad}" y="${height - 6}" width="${core}" height="3" rx="1.5" fill="${esc(color)}" opacity="${maxed? '1' : '0.95'}"/>
+      <rect x="${x + pad}" y="${height - 7}" width="${w - pad * 2}" height="4" rx="2" fill="#000000" opacity="0.28"/>
+      <rect x="${x + pad}" y="${height - 7}" width="${core}" height="4" rx="2" fill="${esc(color)}" opacity="${maxed? '1' : '0.95'}"/>
     `;
   };
 
@@ -202,9 +174,7 @@ export async function GET(req: Request) {
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.05"/>
       <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
     </linearGradient>
-    <mask id="round">
-      <rect width="${totalW}" height="${height}" rx="4" fill="#fff"/>
-    </mask>
+    <mask id="round"><rect width="${totalW}" height="${height}" rx="6" fill="#fff"/></mask>
   </defs>
 
   <g mask="url(#round)">
@@ -214,30 +184,26 @@ export async function GET(req: Request) {
     <rect width="${totalW}" height="${height}" fill="url(#g)"/>
   </g>
 
-  <!-- Left user -->
-  ${icon1 === 'none' ? '' : `<g transform="translate(${8},6)">${iconSvg1}</g>`}
-  <text x="${(icon1 === 'none' ? 10 : 28)}" y="16"
-        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="12" font-weight="700" fill="#ffffff">${escLabelLeft}</text>
-  <text x="${(icon1 === 'none' ? 10 : 28)}" y="29"
-        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+  <!-- Left -->
+  ${icon1 === 'none' ? '' : `<g transform="translate(8,6)">${iconMarkup(icon1)}</g>`}
+  <text x="${(icon1 === 'none' ? 10 : 28)}" y="17" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="12" font-weight="700" fill="#ffffff">${esc(leftText)}</text>
+  <text x="${(icon1 === 'none' ? 10 : 28)}" y="31" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
         font-size="10" fill="${esc(a.tier.color)}" opacity="0.95">${esc(`${a.tier.name} • ${a.bandRoman}`)}</text>
   ${saberBar(0, leftW, prA, a.tier.color, maxedA)}
 
   <!-- VS -->
   <g transform="translate(${leftW},0)">
-    <text x="${sepW/2}" y="24" text-anchor="middle"
+    <text x="${sepW/2}" y="26" text-anchor="middle"
           font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
           font-size="14" font-weight="700" fill="#e5e7eb">VS</text>
   </g>
 
-  <!-- Right user -->
-  ${icon2 === 'none' ? '' : `<g transform="translate(${leftW + sepW + 8},6)">${iconSvg2}</g>`}
-  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="16"
-        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
-        font-size="12" font-weight="700" fill="#ffffff">${escLabelRight}</text>
-  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="29"
-        font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+  <!-- Right -->
+  ${icon2 === 'none' ? '' : `<g transform="translate(${leftW + sepW + 8},6)">${iconMarkup(icon2)}</g>`}
+  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="17" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
+        font-size="12" font-weight="700" fill="#ffffff">${esc(rightText)}</text>
+  <text x="${leftW + sepW + (icon2 === 'none' ? 10 : 28)}" y="31" font-family="Verdana, DejaVu Sans, Geneva, sans-serif"
         font-size="10" fill="${esc(b.tier.color)}" opacity="0.95">${esc(`${b.bandRoman} • ${b.tier.name}`)}</text>
   ${saberBar(leftW + sepW, rightW, prB, b.tier.color, maxedB)}
 </svg>`.trim();
