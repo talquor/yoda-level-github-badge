@@ -13,7 +13,9 @@ import {
   fromContributionCalendar,
   normalizeDays,
   toYMDUTC,
-  computeClassicStreak
+  computeClassicStreak,
+  mergeDaysMax,
+  fromEvents
 } from '@/lib/streak';
 
 export const runtime = 'edge';
@@ -105,6 +107,10 @@ export async function GET(req: Request) {
   const showLabels = !detailed && searchParams.get('labels') === '1'; // compact labels optional
   const pad = 10;
 
+  // Streak parameters
+  const streakWindow = Math.max(30, Math.min(400, parseInt(searchParams.get('streakWindow') || '180', 10) || 180));
+  const anchor = (searchParams.get('anchor') || 'lastActive') as 'today' | 'lastActive';
+
   // 🔐 Token via Authorization header or env
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
   let headerToken: string | undefined;
@@ -131,11 +137,16 @@ export async function GET(req: Request) {
   let streak = 0;
   let distinctPRs30d = 0;
   let distinctIssues30d = 0;
+  let mergedPRs30d = 0;
+  let reviews30d = 0;
+  let cachedEvents: any[] | null = null;
+  let sourceUsed: 'calendar' | 'events' | 'hybrid' = 'events';
 
   try {
-    const [u, repos] = await Promise.all([
+    const [u, repos, events] = await Promise.all([
       fetchUserREST(username, token),
-      fetchReposREST(username, token)
+      fetchReposREST(username, token),
+      fetchEventsREST(username, token)
     ]);
 
     followers = u?.followers ?? 0;
@@ -162,32 +173,62 @@ export async function GET(req: Request) {
     }
     points = applyLegendOverride(username, points, totalStars, followers);
 
-    // Contribution calendar (most accurate for commits/streak)
-    const weeks = await fetchContributionCalendar(username, token, 120);
+    // Contribution calendar (most accurate for commits/streak) + events fallback and hybrid streak
+    const weeks = await fetchContributionCalendar(username, token, Math.max(120, streakWindow));
+    const maxYMD   = toYMDUTC(new Date());
+    const minYMD30 = toYMDUTC(new Date(Date.now() - 30 * 86400000));
+    const minYMD7  = toYMDUTC(new Date(Date.now() - 7  * 86400000));
+    const minYMDStreak = toYMDUTC(new Date(Date.now() - streakWindow * 86400000));
+
+    // Calendar-derived
+    let denseCal: { date: string; count: number }[] = [];
     if (weeks) {
-      const days = fromContributionCalendar(weeks);
-      const maxYMD   = toYMDUTC(new Date());
-      const minYMD30 = toYMDUTC(new Date(Date.now() - 30 * 86400000));
-      const minYMD7  = toYMDUTC(new Date(Date.now() - 7  * 86400000));
-      // Use a wider window for streak so long streaks aren't capped at 30 days
-      const minYMDStreak = toYMDUTC(new Date(Date.now() - 120 * 86400000));
-
-      const d30    = normalizeDays(days, minYMD30,   maxYMD);
-      const d7     = normalizeDays(days, minYMD7,    maxYMD);
-      const d120   = normalizeDays(days, minYMDStreak, maxYMD);
-
+      const calDays = fromContributionCalendar(weeks);
+      const d30 = normalizeDays(calDays, minYMD30, maxYMD);
+      const d7  = normalizeDays(calDays, minYMD7,  maxYMD);
+      denseCal  = normalizeDays(calDays, minYMDStreak, maxYMD);
       commits30d = d30.reduce((s, d) => s + (d.count || 0), 0);
       commits7d  = d7.reduce((s, d) => s + (d.count || 0), 0);
-      streak     = computeClassicStreak(d120, 'lastActive'); // UTC-safe, not 30d-capped
     }
+
+    // Events-derived (approximate, public-only)
+    cachedEvents = events || [];
+    let denseEv: { date: string; count: number }[] = [];
+    if (cachedEvents && Array.isArray(cachedEvents) && cachedEvents.length) {
+      const evDays = fromEvents(cachedEvents, Math.max(120, streakWindow));
+      denseEv = normalizeDays(evDays, minYMDStreak, maxYMD);
+    }
+
+    // Hybrid streak source selection
+    let denseForStreak: { date: string; count: number }[] = [];
+    if (denseCal.length && denseEv.length) {
+      denseForStreak = mergeDaysMax(denseCal, denseEv);
+      sourceUsed = 'hybrid';
+    } else if (denseCal.length) {
+      denseForStreak = denseCal;
+      sourceUsed = 'calendar';
+    } else if (denseEv.length) {
+      denseForStreak = denseEv;
+      sourceUsed = 'events';
+      // Approximate commits from events if calendar missing
+      const d30 = normalizeDays(denseForStreak, minYMD30, maxYMD);
+      const d7  = normalizeDays(denseForStreak, minYMD7,  maxYMD);
+      commits30d = d30.reduce((s, d) => s + (d.count || 0), 0);
+      commits7d  = d7.reduce((s, d) => s + (d.count || 0), 0);
+    }
+
+    streak = computeClassicStreak(denseForStreak, anchor);
 
     // REST events → distinct PR/Issue counts for last 30 days (best-effort)
     {
-      const events = await fetchEventsREST(username, token);
+      // Reuse events if already fetched (fallback path above)
+      const events = cachedEvents ?? await fetchEventsREST(username, token);
       if (events && Array.isArray(events)) {
         const sinceMs = Date.now() - 30 * 86400000;
         const prKeys = new Set<string>();
         const issueKeys = new Set<string>();
+        const prMergedKeys = new Set<string>();
+        const reviewPrKeys = new Set<string>();
 
         for (const e of events) {
           const t = new Date(e?.created_at || e?.createdAt || e?.timestamp || Date.now()).getTime();
@@ -195,9 +236,25 @@ export async function GET(req: Request) {
           const parsed = parseEventKey(e);
           if (parsed.kind === 'pr' && parsed.key) prKeys.add(parsed.key);
           if (parsed.kind === 'issue' && parsed.key) issueKeys.add(parsed.key);
+          // Merged PRs via closed+merged PR events
+          if (e?.type === 'PullRequestEvent' && (e?.payload?.action === 'closed')) {
+            const pr = e?.payload?.pull_request || e?.payload?.pullRequest;
+            const num = pr?.number ?? e?.payload?.number;
+            const repo = e?.repo?.name || e?.repo?.id;
+            if (repo && typeof num === 'number' && pr?.merged) prMergedKeys.add(`pr:${repo}#${num}`);
+          }
+          // Reviews via PullRequestReviewEvent (count distinct PRs reviewed)
+          if (e?.type === 'PullRequestReviewEvent') {
+            const pr = e?.payload?.pull_request || e?.payload?.pullRequest;
+            const num = pr?.number ?? e?.payload?.number;
+            const repo = e?.repo?.name || e?.repo?.id;
+            if (repo && typeof num === 'number') reviewPrKeys.add(`pr:${repo}#${num}`);
+          }
         }
         distinctPRs30d = prKeys.size;
         distinctIssues30d = issueKeys.size;
+        mergedPRs30d = prMergedKeys.size;
+        reviews30d = reviewPrKeys.size;
       }
     }
   } catch (err: any) {
@@ -222,6 +279,22 @@ export async function GET(req: Request) {
       desc: 'At least 1 commit in the last 7 days.',
       unlocked: commits7d >= 1,
       stats: { commits7d }
+    },
+    {
+      key: 'merged-pr-knight',
+      emoji: '✅',
+      name: 'Merged PR Knight',
+      desc: '2+ PRs merged in the last 30 days.',
+      unlocked: mergedPRs30d >= 2,
+      stats: { mergedPRs30d }
+    },
+    {
+      key: 'review-sage',
+      emoji: '📝',
+      name: 'Review Sage',
+      desc: 'Reviewed 3+ distinct PRs in 30 days.',
+      unlocked: reviews30d >= 3,
+      stats: { reviews30d }
     },
     {
       key: 'sith-survivor',
@@ -273,8 +346,18 @@ export async function GET(req: Request) {
     }
   ];
 
+  // ETag helper (FNV-1a 32-bit, weak)
+  const etag = (s: string) => {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return 'W/"' + (h >>> 0).toString(16) + '"';
+  };
+
   if (mode === 'json') {
-    return new Response(JSON.stringify({
+    const bodyObj = {
       username,
       followers,
       totalStars,
@@ -284,9 +367,33 @@ export async function GET(req: Request) {
       streak,
       prs30d: distinctPRs30d,
       issues30d: distinctIssues30d,
+      mergedPRs30d,
+      reviews30d,
+      sourceUsed,
       trials
-    }), {
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    };
+    const body = JSON.stringify(bodyObj);
+    const tag = etag(body);
+    const inm = req.headers.get('if-none-match');
+    if (inm && inm === tag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          'ETag': tag,
+          'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+          'Access-Control-Allow-Origin': '*',
+          'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+        }
+      });
+    }
+    return new Response(body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'ETag': tag,
+        'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+        'Access-Control-Allow-Origin': '*',
+        'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+      }
     });
   }
 
@@ -362,14 +469,30 @@ export async function GET(req: Request) {
   ${cells}
 </svg>`.trim();
 
-    return new Response(svg, {
-      headers: {
-        'Content-Type': 'image/svg+xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
-        'Access-Control-Allow-Origin': '*',
-        'Vary': 'Authorization, Accept-Encoding'
+    {
+      const tag = etag(svg);
+      const inm = req.headers.get('if-none-match');
+      if (inm && inm === tag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            'ETag': tag,
+            'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+            'Access-Control-Allow-Origin': '*',
+            'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+          }
+        });
       }
-    });
+      return new Response(svg, {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'ETag': tag,
+          'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+          'Access-Control-Allow-Origin': '*',
+          'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+        }
+      });
+    }
   }
 
   // Compact strip (icons only) — optionally tiny labels without overflow
@@ -424,13 +547,29 @@ export async function GET(req: Request) {
   ${icons}
 </svg>`.trim();
 
-    return new Response(svg, {
-      headers: {
-        'Content-Type': 'image/svg+xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
-        'Access-Control-Allow-Origin': '*',
-        'Vary': 'Authorization, Accept-Encoding'
+    {
+      const tag = etag(svg);
+      const inm = req.headers.get('if-none-match');
+      if (inm && inm === tag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            'ETag': tag,
+            'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+            'Access-Control-Allow-Origin': '*',
+            'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+          }
+        });
       }
-    });
+      return new Response(svg, {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'ETag': tag,
+          'Cache-Control': 'public, max-age=0, s-maxage=900, must-revalidate',
+          'Access-Control-Allow-Origin': '*',
+          'Vary': 'Authorization, Accept-Encoding, If-None-Match'
+        }
+      });
+    }
   }
 }
