@@ -60,17 +60,24 @@ function wrapLines(text: string, maxChars: number, maxLines: number): { lines: s
   return { lines, truncated };
 }
 
-/** Parse PR/Issue IDs from events to avoid double-counting. */
+/** Parse PR/Issue IDs from events to avoid double-counting.
+ * Only count newly opened PRs/issues within the window.
+ */
 function parseEventKey(e: any): { kind: 'pr' | 'issue' | null; key?: string } {
   const type = e?.type;
   const repo = e?.repo?.name || e?.repo?.id;
+  const action = e?.payload?.action;
   if (type === 'PullRequestEvent') {
+    // Count only PRs that were opened (avoid counting updates to older PRs)
+    if (action !== 'opened') return { kind: null };
     const num = e?.payload?.number ?? e?.payload?.pull_request?.number ?? e?.payload?.pullRequest?.number;
-    if (repo && Number.isFinite(num)) return { kind: 'pr', key: `pr:${repo}#${num}` };
+    if (repo && typeof num === 'number' && Number.isFinite(num)) return { kind: 'pr', key: `pr:${repo}#${num}` };
   }
   if (type === 'IssuesEvent') {
+    // Count only issues that were opened
+    if (action !== 'opened') return { kind: null };
     const num = e?.payload?.issue?.number ?? e?.payload?.number;
-    if (repo && Number.isFinite(num)) return { kind: 'issue', key: `issue:${repo}#${num}` };
+    if (repo && typeof num === 'number' && Number.isFinite(num)) return { kind: 'issue', key: `issue:${repo}#${num}` };
   }
   return { kind: null };
 }
@@ -159,16 +166,19 @@ export async function GET(req: Request) {
     const weeks = await fetchContributionCalendar(username, token, 120);
     if (weeks) {
       const days = fromContributionCalendar(weeks);
+      const maxYMD   = toYMDUTC(new Date());
       const minYMD30 = toYMDUTC(new Date(Date.now() - 30 * 86400000));
       const minYMD7  = toYMDUTC(new Date(Date.now() - 7  * 86400000));
-      const maxYMD   = toYMDUTC(new Date());
+      // Use a wider window for streak so long streaks aren't capped at 30 days
+      const minYMDStreak = toYMDUTC(new Date(Date.now() - 120 * 86400000));
 
-      const d30 = normalizeDays(days, minYMD30, maxYMD);
-      const d7  = normalizeDays(days, minYMD7,  maxYMD);
+      const d30    = normalizeDays(days, minYMD30,   maxYMD);
+      const d7     = normalizeDays(days, minYMD7,    maxYMD);
+      const d120   = normalizeDays(days, minYMDStreak, maxYMD);
 
       commits30d = d30.reduce((s, d) => s + (d.count || 0), 0);
       commits7d  = d7.reduce((s, d) => s + (d.count || 0), 0);
-      streak     = computeClassicStreak(d30, 'lastActive'); // UTC-safe
+      streak     = computeClassicStreak(d120, 'lastActive'); // UTC-safe, not 30d-capped
     }
 
     // REST events → distinct PR/Issue counts for last 30 days (best-effort)
